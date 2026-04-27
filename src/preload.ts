@@ -1,0 +1,27 @@
+import { contextBridge, ipcRenderer } from "electron";
+import type { FolderPatch, ImportResult, LibraryState, MediaPatch, VaultStatus } from "./shared/types";
+
+type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const result = (await ipcRenderer.invoke(channel, ...args)) as IpcResult<T>;
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+  return result.data;
+}
+
+contextBridge.exposeInMainWorld("milbi", {
+  getStatus: () => invoke<VaultStatus>("vault:status"),
+  createVault: (password: string) => invoke<LibraryState>("vault:create", password),
+  unlockVault: (password: string) => invoke<LibraryState>("vault:unlock", password),
+  lockVault: () => invoke<VaultStatus>("vault:lock"),
+  getLibrary: () => invoke<LibraryState>("library:get"),
+  createFolder: (name: string, parentId?: string) => invoke<LibraryState>("folder:create", name, parentId),
+  updateFolder: (folderId: string, patch: FolderPatch) => invoke<LibraryState>("folder:update", folderId, patch),
+  deleteFolder: (folderId: string) => invoke<LibraryState>("folder:delete", folderId),
+  importMedia: (folderId?: string) => invoke<ImportResult>("media:import", folderId),
+  updateMedia: (itemId: string, patch: MediaPatch) => invoke<LibraryState>("media:update", itemId, patch),
+  deleteMedia: (itemId: string) => invoke<LibraryState>("media:delete", itemId),
+  mediaSrc: (itemId: string) => `milbi://media/${encodeURIComponent(itemId)}`
+});
