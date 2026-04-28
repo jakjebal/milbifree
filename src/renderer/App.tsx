@@ -12,6 +12,7 @@ import {
   Pencil,
   Play,
   Search,
+  Shuffle,
   Tag,
   Trash2,
   Video,
@@ -617,23 +618,103 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
   const [chromeVisible, setChromeVisible] = useState(true);
   const [playing, setPlaying] = useState(true);
   const [imageZoom, setImageZoom] = useState(1);
+  const [randomMode, setRandomMode] = useState(false);
+  const [excludeSeen, setExcludeSeen] = useState(false);
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set([startId]));
+  const [randomHistory, setRandomHistory] = useState<string[]>([startId]);
+  const [historyIndex, setHistoryIndex] = useState(0);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hideTimer = useRef<number | null>(null);
 
-  const currentIndex = Math.max(
-    0,
-    items.findIndex((item) => item.id === currentId)
-  );
+  const foundIndex = items.findIndex((item) => item.id === currentId);
+  const currentIndex = Math.max(0, foundIndex);
   const current = items[currentIndex] ?? items[0];
+  const remainingRandomCount = Math.max(0, items.filter((item) => !seenIds.has(item.id)).length);
 
-  function go(delta: number): void {
+  function selectItem(itemId: string): void {
+    setCurrentId(itemId);
+    setSeenIds((existing) => {
+      if (existing.has(itemId)) return existing;
+      const next = new Set(existing);
+      next.add(itemId);
+      return next;
+    });
+    onSelect(itemId);
+    setPlaying(true);
+    revealChrome();
+  }
+
+  function goSequential(delta: number): void {
     if (items.length === 0) return;
     const next = items[(currentIndex + delta + items.length) % items.length];
-    setCurrentId(next.id);
-    onSelect(next.id);
-    setPlaying(true);
+    selectItem(next.id);
+  }
+
+  function goRandom(delta: number): void {
+    if (items.length === 0 || !current) return;
+
+    if (delta < 0) {
+      if (historyIndex > 0) {
+        const previousId = randomHistory[historyIndex - 1];
+        setHistoryIndex((index) => Math.max(0, index - 1));
+        selectItem(previousId);
+      }
+      return;
+    }
+
+    if (historyIndex < randomHistory.length - 1) {
+      const nextId = randomHistory[historyIndex + 1];
+      setHistoryIndex((index) => Math.min(randomHistory.length - 1, index + 1));
+      selectItem(nextId);
+      return;
+    }
+
+    const candidates = items.filter((item) => {
+      if (excludeSeen) return !seenIds.has(item.id);
+      return items.length === 1 || item.id !== current.id;
+    });
+    if (candidates.length === 0) {
+      revealChrome();
+      return;
+    }
+
+    const next = candidates[Math.floor(Math.random() * candidates.length)];
+    setRandomHistory((history) => [...history.slice(0, historyIndex + 1), next.id]);
+    setHistoryIndex((index) => index + 1);
+    selectItem(next.id);
+  }
+
+  function go(delta: number): void {
+    if (randomMode) {
+      goRandom(delta);
+      return;
+    }
+    goSequential(delta);
+  }
+
+  function toggleRandomMode(): void {
+    setRandomMode((enabled) => {
+      const nextEnabled = !enabled;
+      if (!nextEnabled) {
+        setExcludeSeen(false);
+      }
+      setRandomHistory([current?.id ?? startId]);
+      setHistoryIndex(0);
+      revealChrome();
+      return nextEnabled;
+    });
+  }
+
+  function toggleExcludeSeen(): void {
+    if (!randomMode) {
+      setRandomMode(true);
+      setRandomHistory([current?.id ?? startId]);
+      setHistoryIndex(0);
+    }
+    setExcludeSeen((enabled) => !enabled);
+    revealChrome();
   }
 
   function toggleVideo(): void {
@@ -687,6 +768,33 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
   }, [current?.id]);
 
   useEffect(() => {
+    const validIds = new Set(items.map((item) => item.id));
+    if (items.length === 0) {
+      onClose();
+      return;
+    }
+    if (!validIds.has(currentId)) {
+      selectItem(items[0].id);
+    }
+    setSeenIds((existing) => {
+      const next = new Set([...existing].filter((itemId) => validIds.has(itemId)));
+      if (next.size === existing.size && [...next].every((itemId) => existing.has(itemId))) {
+        return existing;
+      }
+      return next;
+    });
+    setRandomHistory((history) => {
+      const nextHistory = history.filter((itemId) => validIds.has(itemId));
+      const safeHistory = nextHistory.length > 0 ? nextHistory : [items[0].id];
+      setHistoryIndex((index) => Math.min(index, Math.max(0, safeHistory.length - 1)));
+      if (history.length === safeHistory.length && history.every((itemId, index) => itemId === safeHistory[index])) {
+        return history;
+      }
+      return safeHistory;
+    });
+  }, [items, currentId]);
+
+  useEffect(() => {
     function keydown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -705,7 +813,7 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
 
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [current, currentIndex, items]);
+  }, [current, currentIndex, excludeSeen, historyIndex, items, randomHistory, randomMode, seenIds]);
 
   if (!current) {
     return null;
@@ -745,6 +853,21 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
           <small>
             {currentIndex + 1} / {items.length}
           </small>
+        </div>
+        <div className="viewer-controls">
+          <button className={`viewer-chip ${randomMode ? "active" : ""}`} title="랜덤 넘기기" onClick={toggleRandomMode}>
+            <Shuffle size={15} />
+            랜덤
+          </button>
+          <button
+            className={`viewer-chip ${excludeSeen ? "active" : ""}`}
+            title="이미 나온 항목 제외"
+            onClick={toggleExcludeSeen}
+          >
+            <Eye size={15} />
+            중복 제외
+          </button>
+          {randomMode && excludeSeen && <span className="viewer-remaining">남은 {remainingRandomCount}</span>}
         </div>
         <button className="viewer-button" title="닫기" onClick={onClose}>
           <X size={20} />

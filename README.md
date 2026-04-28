@@ -20,6 +20,7 @@ Windows and macOS.
   - `ArrowLeft` or `A`: previous item
   - `Space` or `K`: play/pause video
   - `Esc`: close viewer
+- Random viewing mode with an optional no-repeat toggle and remaining count
 - Image viewing controls:
   - `Ctrl` + mouse wheel: zoom image from 100% to 600%
   - Mouse wheel / trackpad scroll: pan around a zoomed image

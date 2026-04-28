@@ -721,7 +721,7 @@ button {
 }
 
 .viewer-title {
-  max-width: min(720px, calc(100vw - 112px));
+  max-width: min(720px, calc(100vw - 360px));
   padding: 8px 10px;
   display: flex;
   align-items: center;
@@ -729,6 +729,43 @@ button {
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
+}
+
+.viewer-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.viewer-chip,
+.viewer-remaining {
+  min-height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #e9e9e9;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.viewer-chip {
+  cursor: pointer;
+}
+
+.viewer-chip:hover,
+.viewer-chip.active {
+  background: rgba(121, 183, 145, 0.84);
+  color: #09100c;
+}
+
+.viewer-remaining {
+  color: #d8d8d8;
+  pointer-events: none;
 }
 
 .viewer-title span {
@@ -801,5 +838,19 @@ button {
     bottom: 0;
     z-index: 20;
     box-shadow: -24px 0 70px rgba(0, 0, 0, 0.42);
+  }
+
+  .viewer-title {
+    max-width: min(520px, calc(100vw - 270px));
+  }
+
+  .viewer-chip {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .viewer-chip {
+    font-size: 0;
   }
 }
