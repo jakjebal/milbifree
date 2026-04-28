@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { FolderPatch, ImportResult, LibraryState, MediaPatch, VaultStatus } from "./shared/types";
 
 type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -13,6 +13,7 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 contextBridge.exposeInMainWorld("milbi", {
   getStatus: () => invoke<VaultStatus>("vault:status"),
+  chooseVaultLocation: () => invoke<VaultStatus>("vault:chooseLocation"),
   createVault: (password: string) => invoke<LibraryState>("vault:create", password),
   unlockVault: (password: string) => invoke<LibraryState>("vault:unlock", password),
   lockVault: () => invoke<VaultStatus>("vault:lock"),
@@ -21,7 +22,9 @@ contextBridge.exposeInMainWorld("milbi", {
   updateFolder: (folderId: string, patch: FolderPatch) => invoke<LibraryState>("folder:update", folderId, patch),
   deleteFolder: (folderId: string) => invoke<LibraryState>("folder:delete", folderId),
   importMedia: (folderId?: string) => invoke<ImportResult>("media:import", folderId),
+  importDroppedMedia: (filePaths: string[], folderId?: string) => invoke<ImportResult>("media:importPaths", filePaths, folderId),
   updateMedia: (itemId: string, patch: MediaPatch) => invoke<LibraryState>("media:update", itemId, patch),
   deleteMedia: (itemId: string) => invoke<LibraryState>("media:delete", itemId),
-  mediaSrc: (itemId: string) => `milbi://media/${encodeURIComponent(itemId)}`
+  mediaSrc: (itemId: string) => `milbi://media/${encodeURIComponent(itemId)}`,
+  filePathFor: (file: File) => webUtils.getPathForFile(file)
 });

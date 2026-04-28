@@ -27,7 +27,7 @@ export interface LibraryState {
 export interface VaultStatus {
   exists: boolean;
   unlocked: boolean;
-  vaultPath?: string;
+  vaultPath: string;
 }
 
 export interface ImportResult {

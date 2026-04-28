@@ -70,6 +70,7 @@ function handle<TArgs extends unknown[], TResult>(
 
 function registerIpc(): void {
   handle("vault:status", () => vault.status());
+  handle("vault:chooseLocation", () => vault.chooseLocation(mainWindow));
   handle("vault:create", (password: string) => vault.create(password));
   handle("vault:unlock", (password: string) => vault.unlock(password));
   handle("vault:lock", () => {
@@ -85,12 +86,18 @@ function registerIpc(): void {
     app.clearRecentDocuments();
     return result;
   });
+  handle("media:importPaths", async (filePaths: string[], folderId?: string) => {
+    const result = await vault.importMediaPaths(filePaths, folderId);
+    app.clearRecentDocuments();
+    return result;
+  });
   handle("media:update", (itemId: string, patch: MediaPatch) => vault.updateMedia(itemId, patch));
   handle("media:delete", (itemId: string) => vault.deleteMedia(itemId));
 }
 
 app.whenReady().then(async () => {
   vault = new VaultManager(app.getPath("userData"));
+  await vault.init();
   Menu.setApplicationMenu(null);
   registerIpc();
 

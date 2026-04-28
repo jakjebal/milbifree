@@ -7,9 +7,11 @@ Windows and macOS.
 ## Current Scope
 
 - Password-gated encrypted vault creation and unlock
-- AES-256-GCM encrypted media blobs under the app data directory
+- User-selectable vault folder
+- AES-256-GCM encrypted media blobs under the selected vault folder
 - Encrypted library metadata
 - Image and video import through the native file picker
+- Drag-and-drop image and video import
 - Folder filtering, tag filtering, sidebar search, thumbnail grid
 - Per-item name, folder, and tag editing
 - Fullscreen viewing with minimal chrome
@@ -18,12 +20,24 @@ Windows and macOS.
   - `ArrowLeft` or `A`: previous item
   - `Space` or `K`: play/pause video
   - `Esc`: close viewer
+- Image viewing controls:
+  - `Ctrl` + mouse wheel: zoom image from 100% to 600%
+  - Mouse wheel / trackpad scroll: pan around a zoomed image
 
 ## Security Model
 
-Imported files are copied into the Milbi app data directory as encrypted
+Imported files are copied into the selected Milbi vault folder as encrypted
 `.milbi` blobs. Original file names, folders, and tags are stored only inside the
 encrypted metadata file. The app does not store original source paths.
+
+The default vault location is Electron's app data directory:
+
+- macOS: `~/Library/Application Support/Milbi/vault`
+- Windows: `%APPDATA%\Milbi\vault`
+
+The lock screen shows the active vault folder and lets you choose another folder.
+Selecting a folder that already contains a Milbi vault opens that vault after the
+correct password is entered. Selecting an empty folder creates the vault there.
 
 Milbi also adds best-effort OS indexing hints: `.metadata_never_index` on macOS
 and hidden/not-content-indexed attributes on Windows when available.
@@ -70,7 +84,5 @@ Windows machine or CI runner; macOS packaging should be run on macOS.
 
 - Streaming decryption for large video files
 - Encrypted thumbnail cache instead of full media preview loading
-- Drag-and-drop import
-- Folder rename/delete controls in the sidebar
 - Optional decoy timeout and auto-lock on inactivity
 - Export selected encrypted items back to normal files after password unlock

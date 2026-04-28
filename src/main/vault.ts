@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { dialog } from "electron";
+import { BrowserWindow, dialog } from "electron";
 import type {
   FolderPatch,
   FolderRecord,
@@ -18,6 +18,7 @@ const ROOT_FOLDER_ID = "root";
 const CONTAINER_MAGIC = Buffer.from("MLBI1");
 const METADATA_FILE = "metadata.milbi";
 const CONFIG_FILE = "config.json";
+const SETTINGS_FILE = "settings.json";
 const FILES_DIR = "files";
 const execFileAsync = promisify(execFile);
 
@@ -50,6 +51,10 @@ interface VaultConfig {
   createdAt: number;
   kdf: typeof KDF & { salt: string };
   verifier: string;
+}
+
+interface VaultSettings {
+  vaultPath?: string;
 }
 
 interface EncryptedHeader {
@@ -148,14 +153,24 @@ function mediaKindForMime(mimeType: string): MediaRecord["kind"] {
 }
 
 export class VaultManager {
-  private readonly vaultRoot: string;
-  private readonly filesRoot: string;
+  private readonly userDataPath: string;
+  private readonly defaultVaultRoot: string;
+  private readonly settingsPath: string;
+  private vaultRoot: string;
   private key: Buffer | null = null;
   private library: LibraryState | null = null;
 
   constructor(userDataPath: string) {
-    this.vaultRoot = path.join(userDataPath, "vault");
-    this.filesRoot = path.join(this.vaultRoot, FILES_DIR);
+    this.userDataPath = userDataPath;
+    this.defaultVaultRoot = path.join(userDataPath, "vault");
+    this.settingsPath = path.join(userDataPath, SETTINGS_FILE);
+    this.vaultRoot = this.defaultVaultRoot;
+  }
+
+  async init(): Promise<void> {
+    await fs.mkdir(this.userDataPath, { recursive: true, mode: 0o700 });
+    const settings = await this.readSettings();
+    this.vaultRoot = settings.vaultPath ? path.resolve(settings.vaultPath) : this.defaultVaultRoot;
   }
 
   async status(): Promise<VaultStatus> {
@@ -205,12 +220,34 @@ export class VaultManager {
     const library = decryptJson<LibraryState>(await fs.readFile(this.metadataPath()), key);
     this.key = key;
     this.library = this.normalizeLibrary(library);
+    await this.prepareVaultDirectory();
     return this.snapshot();
   }
 
   lock(): void {
     this.key = null;
     this.library = null;
+  }
+
+  async chooseLocation(owner?: BrowserWindow | null): Promise<VaultStatus> {
+    if (this.isUnlocked()) {
+      throw new Error("보관함을 잠근 뒤 저장 위치를 변경할 수 있습니다.");
+    }
+
+    const options: Electron.OpenDialogOptions = {
+      title: "보관함 폴더 선택",
+      defaultPath: this.vaultRoot,
+      properties: ["openDirectory", "createDirectory"]
+    };
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return this.status();
+    }
+
+    this.vaultRoot = path.resolve(result.filePaths[0]);
+    await this.saveSettings({ vaultPath: this.vaultRoot });
+    return this.status();
   }
 
   getLibrary(): LibraryState {
@@ -266,11 +303,6 @@ export class VaultManager {
   }
 
   async importMedia(folderId = ROOT_FOLDER_ID): Promise<ImportResult> {
-    const library = this.requireUnlocked();
-    if (!library.folders.some((folder) => folder.id === folderId)) {
-      throw new Error("가져올 폴더를 찾을 수 없습니다.");
-    }
-
     const result = await dialog.showOpenDialog({
       title: "이미지 또는 동영상 가져오기",
       properties: ["openFile", "multiSelections"],
@@ -286,10 +318,20 @@ export class VaultManager {
       return { imported: [], skipped: [] };
     }
 
+    return this.importMediaPaths(result.filePaths, folderId);
+  }
+
+  async importMediaPaths(filePaths: string[], folderId = ROOT_FOLDER_ID): Promise<ImportResult> {
+    const library = this.requireUnlocked();
+    if (!library.folders.some((folder) => folder.id === folderId)) {
+      throw new Error("가져올 폴더를 찾을 수 없습니다.");
+    }
+
     const imported: MediaRecord[] = [];
     const skipped: string[] = [];
+    const uniquePaths = [...new Set(filePaths.map((filePath) => path.resolve(filePath)))];
 
-    for (const filePath of result.filePaths) {
+    for (const filePath of uniquePaths) {
       const ext = path.extname(filePath).toLowerCase();
       const mimeType = MEDIA_MIME[ext];
       if (!mimeType) {
@@ -371,6 +413,19 @@ export class VaultManager {
     }
   }
 
+  private async readSettings(): Promise<VaultSettings> {
+    try {
+      return JSON.parse(await fs.readFile(this.settingsPath, "utf8")) as VaultSettings;
+    } catch {
+      return {};
+    }
+  }
+
+  private async saveSettings(settings: VaultSettings): Promise<void> {
+    await fs.mkdir(this.userDataPath, { recursive: true, mode: 0o700 });
+    await fs.writeFile(this.settingsPath, JSON.stringify(settings, null, 2), { mode: 0o600 });
+  }
+
   private async readConfig(): Promise<VaultConfig> {
     try {
       return JSON.parse(await fs.readFile(this.configPath(), "utf8")) as VaultConfig;
@@ -433,6 +488,10 @@ export class VaultManager {
 
   private mediaPath(itemId: string): string {
     return path.join(this.filesRoot, `${itemId}.milbi`);
+  }
+
+  private get filesRoot(): string {
+    return path.join(this.vaultRoot, FILES_DIR);
   }
 
   private async prepareVaultDirectory(): Promise<void> {

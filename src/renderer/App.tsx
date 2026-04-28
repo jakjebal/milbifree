@@ -5,6 +5,7 @@ import {
   FileInput,
   Folder,
   FolderPlus,
+  HardDrive,
   Image as ImageIcon,
   Lock,
   Pause,
@@ -16,7 +17,7 @@ import {
   Video,
   X
 } from "lucide-react";
-import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, DragEvent, FormEvent, MouseEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ImportResult, LibraryState, MediaRecord, VaultStatus } from "../shared/types";
 
 const ALL_SCOPE = "all";
@@ -62,6 +63,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewerId, setViewerId] = useState<string | null>(null);
+  const [draggingFiles, setDraggingFiles] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -134,19 +136,50 @@ function App() {
     });
   }
 
+  function targetFolderId(): string {
+    return scope === ALL_SCOPE ? ROOT_FOLDER_ID : scope;
+  }
+
+  function handleImportResult(result: ImportResult): void {
+    if (result.imported.length > 0) {
+      void window.milbi.getLibrary().then(setLibrary);
+    }
+    if (result.skipped.length > 0) {
+      setError(`가져오지 못한 파일: ${result.skipped.join(", ")}`);
+    }
+  }
+
   function handleImport(): void {
-    const targetFolder = scope === ALL_SCOPE ? ROOT_FOLDER_ID : scope;
-    void run(
-      () => window.milbi.importMedia(targetFolder),
-      (result: ImportResult) => {
-        if (result.imported.length > 0) {
-          void window.milbi.getLibrary().then(setLibrary);
-        }
-        if (result.skipped.length > 0) {
-          setError(`가져오지 못한 파일: ${result.skipped.join(", ")}`);
-        }
-      }
-    );
+    void run(() => window.milbi.importMedia(targetFolderId()), handleImportResult);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>): void {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDraggingFiles(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>): void {
+    const nextTarget = event.relatedTarget;
+    if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+      setDraggingFiles(false);
+    }
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    setDraggingFiles(false);
+    const filePaths = Array.from(event.dataTransfer.files)
+      .map((file) => window.milbi.filePathFor(file))
+      .filter(Boolean);
+
+    if (filePaths.length === 0) {
+      setError("드롭한 파일 경로를 읽을 수 없습니다.");
+      return;
+    }
+
+    void run(() => window.milbi.importDroppedMedia(filePaths, targetFolderId()), handleImportResult);
   }
 
   function handleLock(): void {
@@ -165,11 +198,16 @@ function App() {
   }
 
   if (!library || !status.unlocked) {
-    return <LockScreen status={status} busy={busy} error={error} run={run} onReady={handleUnlock} />;
+    return <LockScreen status={status} busy={busy} error={error} run={run} onReady={handleUnlock} onStatus={setStatus} />;
   }
 
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell ${draggingFiles ? "dragging" : ""}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <aside className="sidebar">
         <div className="brand-row">
           <div>
@@ -256,6 +294,10 @@ function App() {
             ))
           )}
         </div>
+        <div className="vault-path" title={status.vaultPath}>
+          <HardDrive size={14} />
+          <span>{status.vaultPath}</span>
+        </div>
       </aside>
 
       <main className="library">
@@ -315,6 +357,15 @@ function App() {
           onSelect={(itemId) => setSelectedId(itemId)}
         />
       )}
+
+      {draggingFiles && (
+        <div className="drop-overlay">
+          <div>
+            <FileInput size={34} />
+            <span>파일을 놓아 보관함에 저장</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -325,9 +376,10 @@ interface LockScreenProps {
   error: string | null;
   run: <T>(task: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<void>;
   onReady: (library: LibraryState) => Promise<void>;
+  onStatus: (status: VaultStatus) => void;
 }
 
-function LockScreen({ status, busy, error, run, onReady }: LockScreenProps) {
+function LockScreen({ status, busy, error, run, onReady, onStatus }: LockScreenProps) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
 
@@ -342,6 +394,10 @@ function LockScreen({ status, busy, error, run, onReady }: LockScreenProps) {
     );
   }
 
+  function chooseLocation(): void {
+    void run(() => window.milbi.chooseVaultLocation(), onStatus);
+  }
+
   return (
     <main className="lock-screen">
       <form className="lock-panel" onSubmit={submit}>
@@ -350,6 +406,13 @@ function LockScreen({ status, busy, error, run, onReady }: LockScreenProps) {
         </div>
         <h1>{status.exists ? "보관함 열기" : "보관함 만들기"}</h1>
         <p>{status.exists ? "암호를 입력하세요." : "암호를 잃으면 보관함을 복구할 수 없습니다."}</p>
+        <div className="location-box">
+          <HardDrive size={16} />
+          <span title={status.vaultPath}>{status.vaultPath}</span>
+          <button type="button" className="secondary-button compact" onClick={chooseLocation} disabled={busy}>
+            위치 선택
+          </button>
+        </div>
         <input
           autoFocus
           minLength={8}
@@ -553,7 +616,9 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
   const [currentId, setCurrentId] = useState(startId);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [playing, setPlaying] = useState(true);
+  const [imageZoom, setImageZoom] = useState(1);
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hideTimer = useRef<number | null>(null);
 
@@ -583,6 +648,17 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
     }
   }
 
+  function changeImageZoom(delta: number): void {
+    setImageZoom((value) => Math.min(6, Math.max(1, Number((value + delta).toFixed(2)))));
+  }
+
+  function handleViewerWheel(event: WheelEvent<HTMLDivElement>): void {
+    if (current.kind !== "image" || !event.ctrlKey) return;
+    event.preventDefault();
+    changeImageZoom(event.deltaY < 0 ? 0.15 : -0.15);
+    revealChrome();
+  }
+
   function revealChrome(): void {
     setChromeVisible(true);
     if (hideTimer.current) {
@@ -606,12 +682,20 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
   }, []);
 
   useEffect(() => {
+    setImageZoom(1);
+    stageRef.current?.scrollTo({ left: 0, top: 0 });
+  }, [current?.id]);
+
+  useEffect(() => {
     function keydown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
+        event.preventDefault();
         onClose();
       } else if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") {
+        event.preventDefault();
         go(1);
       } else if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
+        event.preventDefault();
         go(-1);
       } else if ((event.key === " " || event.key.toLowerCase() === "k") && current?.kind === "video") {
         event.preventDefault();
@@ -629,7 +713,12 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
 
   return (
     <div ref={shellRef} className={`viewer ${chromeVisible ? "chrome" : ""}`} onMouseMove={revealChrome}>
-      <div className="viewer-stage" onClick={current.kind === "video" ? toggleVideo : undefined}>
+      <div
+        ref={stageRef}
+        className={`viewer-stage ${current.kind === "image" ? "image-stage" : ""}`}
+        onClick={current.kind === "video" ? toggleVideo : undefined}
+        onWheel={handleViewerWheel}
+      >
         {current.kind === "video" ? (
           <video
             key={current.id}
@@ -641,7 +730,12 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
             onPause={() => setPlaying(false)}
           />
         ) : (
-          <img key={current.id} src={mediaSrc(current.id)} alt="" />
+          <div
+            className="viewer-image-canvas"
+            style={{ width: `${imageZoom * 100}%`, height: `${imageZoom * 100}%` } as CSSProperties}
+          >
+            <img key={current.id} src={mediaSrc(current.id)} alt="" />
+          </div>
         )}
       </div>
 
@@ -669,6 +763,8 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
           {playing ? <Pause size={22} /> : <Play size={22} />}
         </button>
       )}
+
+      {current.kind === "image" && <div className="viewer-zoom">{Math.round(imageZoom * 100)}%</div>}
     </div>
   );
 }
