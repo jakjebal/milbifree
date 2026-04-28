@@ -14,6 +14,7 @@ Windows and macOS.
 - Drag-and-drop image and video import
 - Folder filtering, tag filtering, sidebar search, thumbnail grid
 - Per-item name, folder, and tag editing
+- Cumulative per-item likes
 - Fullscreen viewing with minimal chrome
 - Keyboard controls in viewing mode:
   - `ArrowRight` or `D`: next item
@@ -22,6 +23,7 @@ Windows and macOS.
   - `Esc`: close viewer
 - Random viewing mode with an optional no-repeat toggle and remaining count
 - Image viewing controls:
+  - `Fit screen`, `fit width`, and `fit height` modes
   - `Ctrl` + mouse wheel: zoom image from 100% to 600%
   - Mouse wheel / trackpad scroll: pan around a zoomed image
 
@@ -46,6 +48,9 @@ and hidden/not-content-indexed attributes on Windows when available.
 The renderer cannot read local files directly. It requests library operations
 through Electron IPC, and media bytes are served only after the vault is unlocked
 through the private `milbi://media/...` protocol with no-store cache headers.
+
+Milbi avoids app media caching and OS indexing hints, but it does not clear the
+operating system's global recent documents list.
 
 Practical limits:
 

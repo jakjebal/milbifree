@@ -16,6 +16,7 @@ export interface MediaRecord {
   size: number;
   folderId: string;
   tags: string[];
+  likes: number;
   importedAt: number;
 }
 

@@ -23,8 +23,10 @@ contextBridge.exposeInMainWorld("milbi", {
   deleteFolder: (folderId: string) => invoke<LibraryState>("folder:delete", folderId),
   importMedia: (folderId?: string) => invoke<ImportResult>("media:import", folderId),
   importDroppedMedia: (filePaths: string[], folderId?: string) => invoke<ImportResult>("media:importPaths", filePaths, folderId),
+  likeMedia: (itemId: string) => invoke<LibraryState>("media:like", itemId),
   updateMedia: (itemId: string, patch: MediaPatch) => invoke<LibraryState>("media:update", itemId, patch),
   deleteMedia: (itemId: string) => invoke<LibraryState>("media:delete", itemId),
+  setViewerFullscreen: (fullscreen: boolean) => invoke<boolean>("viewer:fullscreen", fullscreen),
   mediaSrc: (itemId: string) => `milbi://media/${encodeURIComponent(itemId)}`,
   filePathFor: (file: File) => webUtils.getPathForFile(file)
 });

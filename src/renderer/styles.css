@@ -735,11 +735,14 @@ button {
   margin-left: auto;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
 }
 
 .viewer-chip,
-.viewer-remaining {
+.viewer-remaining,
+.viewer-segment button {
   min-height: 34px;
   padding: 0 10px;
   display: inline-flex;
@@ -753,14 +756,32 @@ button {
   font-weight: 650;
 }
 
-.viewer-chip {
+.viewer-chip,
+.viewer-segment button {
   cursor: pointer;
 }
 
 .viewer-chip:hover,
-.viewer-chip.active {
+.viewer-chip.active,
+.viewer-segment button:hover,
+.viewer-segment button.active {
   background: rgba(121, 183, 145, 0.84);
   color: #09100c;
+}
+
+.viewer-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.viewer-segment button {
+  min-height: 30px;
+  border-radius: 6px;
+  background: transparent;
 }
 
 .viewer-remaining {
@@ -841,16 +862,18 @@ button {
   }
 
   .viewer-title {
-    max-width: min(520px, calc(100vw - 270px));
+    max-width: min(420px, calc(100vw - 360px));
   }
 
-  .viewer-chip {
+  .viewer-chip,
+  .viewer-segment button {
     width: 34px;
     padding: 0;
     justify-content: center;
   }
 
-  .viewer-chip {
+  .viewer-chip,
+  .viewer-segment button {
     font-size: 0;
   }
 }

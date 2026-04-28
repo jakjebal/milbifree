@@ -81,18 +81,16 @@ function registerIpc(): void {
   handle("folder:create", (name: string, parentId?: string) => vault.createFolder(name, parentId));
   handle("folder:update", (folderId: string, patch: FolderPatch) => vault.updateFolder(folderId, patch));
   handle("folder:delete", (folderId: string) => vault.deleteFolder(folderId));
-  handle("media:import", async (folderId?: string) => {
-    const result = await vault.importMedia(folderId);
-    app.clearRecentDocuments();
-    return result;
-  });
-  handle("media:importPaths", async (filePaths: string[], folderId?: string) => {
-    const result = await vault.importMediaPaths(filePaths, folderId);
-    app.clearRecentDocuments();
-    return result;
-  });
+  handle("media:import", (folderId?: string) => vault.importMedia(folderId));
+  handle("media:importPaths", (filePaths: string[], folderId?: string) => vault.importMediaPaths(filePaths, folderId));
+  handle("media:like", (itemId: string) => vault.likeMedia(itemId));
   handle("media:update", (itemId: string, patch: MediaPatch) => vault.updateMedia(itemId, patch));
   handle("media:delete", (itemId: string) => vault.deleteMedia(itemId));
+  handle("viewer:fullscreen", (fullscreen: boolean) => {
+    mainWindow?.setFullScreen(fullscreen);
+    mainWindow?.setMenuBarVisibility(false);
+    return mainWindow?.isFullScreen() ?? false;
+  });
 }
 
 app.whenReady().then(async () => {
@@ -125,10 +123,6 @@ app.whenReady().then(async () => {
   await session.defaultSession.clearCache();
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   createWindow();
-});
-
-app.on("browser-window-focus", () => {
-  app.clearRecentDocuments();
 });
 
 app.on("window-all-closed", () => {

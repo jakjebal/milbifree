@@ -350,6 +350,7 @@ export class VaultManager {
           size: file.byteLength,
           folderId,
           tags: [],
+          likes: 0,
           importedAt: Date.now()
         };
         await fs.writeFile(this.mediaPath(item.id), encryptBytes(file, this.requireKey()), { mode: 0o600 });
@@ -382,6 +383,13 @@ export class VaultManager {
     if (patch.tags !== undefined) {
       item.tags = normalizeTags(patch.tags);
     }
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
+  async likeMedia(itemId: string): Promise<LibraryState> {
+    const item = this.findItem(itemId);
+    item.likes = (item.likes ?? 0) + 1;
     await this.saveLibrary();
     return this.snapshot();
   }
@@ -469,7 +477,10 @@ export class VaultManager {
     }
     return {
       folders,
-      items: library.items ?? []
+      items: (library.items ?? []).map((item) => ({
+        ...item,
+        likes: item.likes ?? 0
+      }))
     };
   }
 

@@ -6,8 +6,12 @@ import {
   Folder,
   FolderPlus,
   HardDrive,
+  Heart,
   Image as ImageIcon,
   Lock,
+  Maximize2,
+  MoveHorizontal,
+  MoveVertical,
   Pause,
   Pencil,
   Play,
@@ -356,6 +360,7 @@ function App() {
           startId={viewerId}
           onClose={() => setViewerId(null)}
           onSelect={(itemId) => setSelectedId(itemId)}
+          onLibrary={setLibrary}
         />
       )}
 
@@ -588,6 +593,10 @@ function Inspector({ item, library, busy, onClose, onOpen, onLibrary, run }: Ins
           <dt>가져온 날짜</dt>
           <dd>{formatDate(item.importedAt)}</dd>
         </div>
+        <div>
+          <dt>좋아요</dt>
+          <dd>{item.likes}</dd>
+        </div>
       </dl>
 
       <div className="inspector-actions">
@@ -611,13 +620,19 @@ interface ViewerProps {
   startId: string;
   onClose: () => void;
   onSelect: (itemId: string) => void;
+  onLibrary: (library: LibraryState) => void;
 }
 
-function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
+type ImageFitMode = "fit-screen" | "fit-width" | "fit-height";
+
+function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
   const [currentId, setCurrentId] = useState(startId);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [playing, setPlaying] = useState(true);
   const [imageZoom, setImageZoom] = useState(1);
+  const [imageFitMode, setImageFitMode] = useState<ImageFitMode>("fit-screen");
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [randomMode, setRandomMode] = useState(false);
   const [excludeSeen, setExcludeSeen] = useState(false);
   const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set([startId]));
@@ -632,6 +647,32 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
   const currentIndex = Math.max(0, foundIndex);
   const current = items[currentIndex] ?? items[0];
   const remainingRandomCount = Math.max(0, items.filter((item) => !seenIds.has(item.id)).length);
+  const currentLikes = current?.likes ?? 0;
+
+  const fittedImageSize = useMemo(() => {
+    if (!naturalSize.width || !naturalSize.height || !stageSize.width || !stageSize.height) {
+      return {
+        canvasWidth: "100%",
+        canvasHeight: "100%",
+        imageWidth: "100%",
+        imageHeight: "100%"
+      };
+    }
+
+    const widthScale = stageSize.width / naturalSize.width;
+    const heightScale = stageSize.height / naturalSize.height;
+    const baseScale =
+      imageFitMode === "fit-width" ? widthScale : imageFitMode === "fit-height" ? heightScale : Math.min(widthScale, heightScale);
+    const imageWidth = Math.max(1, Math.round(naturalSize.width * baseScale * imageZoom));
+    const imageHeight = Math.max(1, Math.round(naturalSize.height * baseScale * imageZoom));
+
+    return {
+      canvasWidth: `${Math.max(stageSize.width, imageWidth)}px`,
+      canvasHeight: `${Math.max(stageSize.height, imageHeight)}px`,
+      imageWidth: `${imageWidth}px`,
+      imageHeight: `${imageHeight}px`
+    };
+  }, [imageFitMode, imageZoom, naturalSize, stageSize]);
 
   function selectItem(itemId: string): void {
     setCurrentId(itemId);
@@ -729,6 +770,12 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
     }
   }
 
+  function likeCurrent(): void {
+    if (!current) return;
+    void window.milbi.likeMedia(current.id).then(onLibrary).catch(() => undefined);
+    revealChrome();
+  }
+
   function changeImageZoom(delta: number): void {
     setImageZoom((value) => Math.min(6, Math.max(1, Number((value + delta).toFixed(2)))));
   }
@@ -749,21 +796,34 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
   }
 
   useEffect(() => {
-    const shell = shellRef.current;
-    if (shell && !document.fullscreenElement) {
-      void shell.requestFullscreen?.().catch(() => undefined);
-    }
+    void window.milbi.setViewerFullscreen(true).catch(() => undefined);
     revealChrome();
     return () => {
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
-      if (document.fullscreenElement === shell) {
-        void document.exitFullscreen?.().catch(() => undefined);
-      }
+      void window.milbi.setViewerFullscreen(false).catch(() => undefined);
     };
   }, []);
 
   useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const updateSize = () => {
+      setStageSize({
+        width: stage.clientWidth,
+        height: stage.clientHeight
+      });
+    };
+    updateSize();
+
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [current?.kind]);
+
+  useEffect(() => {
     setImageZoom(1);
+    setNaturalSize({ width: 0, height: 0 });
     stageRef.current?.scrollTo({ left: 0, top: 0 });
   }, [current?.id]);
 
@@ -805,6 +865,9 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
       } else if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
         event.preventDefault();
         go(-1);
+      } else if (event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        likeCurrent();
       } else if ((event.key === " " || event.key.toLowerCase() === "k") && current?.kind === "video") {
         event.preventDefault();
         toggleVideo();
@@ -840,9 +903,20 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
         ) : (
           <div
             className="viewer-image-canvas"
-            style={{ width: `${imageZoom * 100}%`, height: `${imageZoom * 100}%` } as CSSProperties}
+            style={{ width: fittedImageSize.canvasWidth, height: fittedImageSize.canvasHeight } as CSSProperties}
           >
-            <img key={current.id} src={mediaSrc(current.id)} alt="" />
+            <img
+              key={current.id}
+              src={mediaSrc(current.id)}
+              alt=""
+              onLoad={(event) => {
+                setNaturalSize({
+                  width: event.currentTarget.naturalWidth,
+                  height: event.currentTarget.naturalHeight
+                });
+              }}
+              style={{ width: fittedImageSize.imageWidth, height: fittedImageSize.imageHeight } as CSSProperties}
+            />
           </div>
         )}
       </div>
@@ -855,6 +929,47 @@ function Viewer({ items, startId, onClose, onSelect }: ViewerProps) {
           </small>
         </div>
         <div className="viewer-controls">
+          {current.kind === "image" && (
+            <div className="viewer-segment" aria-label="이미지 맞춤">
+              <button
+                className={imageFitMode === "fit-screen" ? "active" : ""}
+                title="전체 이미지 맞춤"
+                onClick={() => {
+                  setImageFitMode("fit-screen");
+                  revealChrome();
+                }}
+              >
+                <Maximize2 size={15} />
+                전체
+              </button>
+              <button
+                className={imageFitMode === "fit-width" ? "active" : ""}
+                title="가로 맞춤"
+                onClick={() => {
+                  setImageFitMode("fit-width");
+                  revealChrome();
+                }}
+              >
+                <MoveHorizontal size={15} />
+                가로
+              </button>
+              <button
+                className={imageFitMode === "fit-height" ? "active" : ""}
+                title="세로 맞춤"
+                onClick={() => {
+                  setImageFitMode("fit-height");
+                  revealChrome();
+                }}
+              >
+                <MoveVertical size={15} />
+                세로
+              </button>
+            </div>
+          )}
+          <button className="viewer-chip" title="좋아요" onClick={likeCurrent}>
+            <Heart size={15} />
+            {currentLikes}
+          </button>
           <button className={`viewer-chip ${randomMode ? "active" : ""}`} title="랜덤 넘기기" onClick={toggleRandomMode}>
             <Shuffle size={15} />
             랜덤

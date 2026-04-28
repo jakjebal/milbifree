@@ -16,8 +16,10 @@ declare global {
       deleteFolder: (folderId: string) => Promise<LibraryState>;
       importMedia: (folderId?: string) => Promise<ImportResult>;
       importDroppedMedia: (filePaths: string[], folderId?: string) => Promise<ImportResult>;
+      likeMedia: (itemId: string) => Promise<LibraryState>;
       updateMedia: (itemId: string, patch: MediaPatch) => Promise<LibraryState>;
       deleteMedia: (itemId: string) => Promise<LibraryState>;
+      setViewerFullscreen: (fullscreen: boolean) => Promise<boolean>;
       mediaSrc: (itemId: string) => string;
       filePathFor: (file: File) => string;
     };
