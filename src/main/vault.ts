@@ -394,6 +394,23 @@ export class VaultManager {
     return this.snapshot();
   }
 
+  async addTagsToMedia(itemIds: string[], tags: string[]): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    const cleanTags = normalizeTags(tags);
+    if (itemIds.length === 0 || cleanTags.length === 0) {
+      return this.snapshot();
+    }
+
+    const targetIds = new Set(itemIds);
+    for (const item of library.items) {
+      if (targetIds.has(item.id)) {
+        item.tags = normalizeTags([...item.tags, ...cleanTags]);
+      }
+    }
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
   async deleteMedia(itemId: string): Promise<LibraryState> {
     const library = this.requireUnlocked();
     const item = this.findItem(itemId);

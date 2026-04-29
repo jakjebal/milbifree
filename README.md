@@ -12,7 +12,9 @@ Windows and macOS.
 - Encrypted library metadata
 - Image and video import through the native file picker
 - Drag-and-drop image and video import
-- Folder filtering, tag filtering, sidebar search, thumbnail grid
+- Folder filtering, multi-tag filtering, sidebar search, thumbnail grid, and list view
+- Adjustable thumbnail size
+- Multi-select, select all visible items, and bulk tag assignment
 - Per-item name, folder, and tag editing
 - Cumulative per-item likes
 - Fullscreen viewing with minimal chrome

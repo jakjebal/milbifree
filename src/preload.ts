@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("milbi", {
   importMedia: (folderId?: string) => invoke<ImportResult>("media:import", folderId),
   importDroppedMedia: (filePaths: string[], folderId?: string) => invoke<ImportResult>("media:importPaths", filePaths, folderId),
   likeMedia: (itemId: string) => invoke<LibraryState>("media:like", itemId),
+  addTagsToMedia: (itemIds: string[], tags: string[]) => invoke<LibraryState>("media:addTags", itemIds, tags),
   updateMedia: (itemId: string, patch: MediaPatch) => invoke<LibraryState>("media:update", itemId, patch),
   deleteMedia: (itemId: string) => invoke<LibraryState>("media:delete", itemId),
   setViewerFullscreen: (fullscreen: boolean) => invoke<boolean>("viewer:fullscreen", fullscreen),

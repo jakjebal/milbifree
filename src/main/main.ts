@@ -84,6 +84,7 @@ function registerIpc(): void {
   handle("media:import", (folderId?: string) => vault.importMedia(folderId));
   handle("media:importPaths", (filePaths: string[], folderId?: string) => vault.importMediaPaths(filePaths, folderId));
   handle("media:like", (itemId: string) => vault.likeMedia(itemId));
+  handle("media:addTags", (itemIds: string[], tags: string[]) => vault.addTagsToMedia(itemIds, tags));
   handle("media:update", (itemId: string, patch: MediaPatch) => vault.updateMedia(itemId, patch));
   handle("media:delete", (itemId: string) => vault.deleteMedia(itemId));
   handle("viewer:fullscreen", (fullscreen: boolean) => {

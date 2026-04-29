@@ -5,9 +5,11 @@ import {
   FileInput,
   Folder,
   FolderPlus,
+  Grid2X2,
   HardDrive,
   Heart,
   Image as ImageIcon,
+  List,
   Lock,
   Maximize2,
   MoveHorizontal,
@@ -29,6 +31,7 @@ const ALL_SCOPE = "all";
 const ROOT_FOLDER_ID = "root";
 
 type Scope = typeof ALL_SCOPE | string;
+type ViewMode = "grid" | "list";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -64,10 +67,14 @@ function App() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [library, setLibrary] = useState<LibraryState | null>(null);
   const [scope, setScope] = useState<Scope>(ALL_SCOPE);
-  const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [tagFilters, setTagFilters] = useState<Set<string>>(() => new Set());
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [viewerId, setViewerId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [thumbSize, setThumbSize] = useState(168);
+  const [bulkTags, setBulkTags] = useState("");
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,29 +84,45 @@ function App() {
   }, []);
 
   const tags = useMemo(() => uniqueTags(library?.items ?? []), [library]);
+  const activeTagFilters = useMemo(() => [...tagFilters].sort((a, b) => a.localeCompare(b)), [tagFilters]);
   const selectedItem = useMemo(
-    () => library?.items.find((item) => item.id === selectedId) ?? null,
-    [library, selectedId]
+    () => (selectedIds.size === 1 ? (library?.items.find((item) => selectedIds.has(item.id)) ?? null) : null),
+    [library, selectedIds]
+  );
+  const selectedItems = useMemo(
+    () => (library?.items ?? []).filter((item) => selectedIds.has(item.id)),
+    [library, selectedIds]
   );
 
   const filteredItems = useMemo(() => {
     const lowerQuery = query.trim().toLowerCase();
     return (library?.items ?? []).filter((item) => {
       const inFolder = scope === ALL_SCOPE || item.folderId === scope;
-      const inTag = !tagFilter || item.tags.includes(tagFilter);
+      const inTags = activeTagFilters.every((tag) => item.tags.includes(tag));
       const inSearch =
         !lowerQuery ||
         item.displayName.toLowerCase().includes(lowerQuery) ||
         item.originalName.toLowerCase().includes(lowerQuery) ||
         item.tags.some((tag) => tag.toLowerCase().includes(lowerQuery));
-      return inFolder && inTag && inSearch;
+      return inFolder && inTags && inSearch;
     });
-  }, [library, query, scope, tagFilter]);
+  }, [activeTagFilters, library, query, scope]);
 
   const activeFolderName = useMemo(() => {
     if (!library || scope === ALL_SCOPE) return "전체";
     return library.folders.find((folder) => folder.id === scope)?.name ?? "폴더";
   }, [library, scope]);
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredItems.map((item) => item.id));
+    setSelectedIds((current) => {
+      const next = new Set([...current].filter((itemId) => visibleIds.has(itemId)));
+      if (next.size === current.size && [...next].every((itemId) => current.has(itemId))) {
+        return current;
+      }
+      return next;
+    });
+  }, [filteredItems]);
 
   async function run<T>(task: () => Promise<T>, onSuccess?: (value: T) => void): Promise<void> {
     setBusy(true);
@@ -112,6 +135,81 @@ function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function clearSelection(): void {
+    setSelectedIds(new Set());
+    setLastSelectedId(null);
+  }
+
+  function parseTagInput(value: string): string[] {
+    return value
+      .split(",")
+      .map((tag) => tag.trim().replace(/^#/, ""))
+      .filter(Boolean);
+  }
+
+  function selectItem(itemId: string, event?: MouseEvent, forceToggle = false): void {
+    const additive = forceToggle || event?.metaKey || event?.ctrlKey;
+    const range = event?.shiftKey && lastSelectedId;
+
+    if (range) {
+      const start = filteredItems.findIndex((item) => item.id === lastSelectedId);
+      const end = filteredItems.findIndex((item) => item.id === itemId);
+      if (start >= 0 && end >= 0) {
+        const [from, to] = start < end ? [start, end] : [end, start];
+        const rangeIds = filteredItems.slice(from, to + 1).map((item) => item.id);
+        setSelectedIds((current) => new Set([...current, ...rangeIds]));
+        setLastSelectedId(itemId);
+        return;
+      }
+    }
+
+    if (additive) {
+      setSelectedIds((current) => {
+        const next = new Set(current);
+        if (next.has(itemId)) {
+          next.delete(itemId);
+        } else {
+          next.add(itemId);
+        }
+        return next;
+      });
+    } else {
+      setSelectedIds(new Set([itemId]));
+    }
+    setLastSelectedId(itemId);
+  }
+
+  function toggleTagFilter(tag: string): void {
+    setTagFilters((current) => {
+      const next = new Set(current);
+      if (next.has(tag)) {
+        next.delete(tag);
+      } else {
+        next.add(tag);
+      }
+      return next;
+    });
+    clearSelection();
+  }
+
+  function selectAllVisible(): void {
+    setSelectedIds(new Set(filteredItems.map((item) => item.id)));
+    setLastSelectedId(filteredItems.at(-1)?.id ?? null);
+  }
+
+  function applyBulkTags(): void {
+    const tagsToApply = parseTagInput(bulkTags);
+    if (selectedItems.length === 0 || tagsToApply.length === 0) return;
+
+    void run(
+      () => window.milbi.addTagsToMedia(selectedItems.map((item) => item.id), tagsToApply),
+      (nextLibrary) => {
+        setLibrary(nextLibrary);
+        setBulkTags("");
+      }
+    );
   }
 
   async function handleUnlock(nextLibrary: LibraryState): Promise<void> {
@@ -192,7 +290,7 @@ function App() {
       const nextStatus = await window.milbi.lockVault();
       setStatus(nextStatus);
       setLibrary(null);
-      setSelectedId(null);
+      clearSelection();
       setViewerId(null);
       return nextStatus;
     });
@@ -245,7 +343,7 @@ function App() {
             className={`side-item ${scope === ALL_SCOPE ? "active" : ""}`}
             onClick={() => {
               setScope(ALL_SCOPE);
-              setSelectedId(null);
+              clearSelection();
             }}
           >
             <Folder size={16} />
@@ -259,7 +357,7 @@ function App() {
                   className="side-item"
                   onClick={() => {
                     setScope(folder.id);
-                    setSelectedId(null);
+                    clearSelection();
                   }}
                 >
                   <Folder size={16} />
@@ -278,8 +376,14 @@ function App() {
         <div className="side-section grow">
           <div className="side-heading">
             <span>태그</span>
-            {tagFilter && (
-              <button className="text-button" onClick={() => setTagFilter(null)}>
+            {activeTagFilters.length > 0 && (
+              <button
+                className="text-button"
+                onClick={() => {
+                  setTagFilters(new Set());
+                  clearSelection();
+                }}
+              >
                 해제
               </button>
             )}
@@ -289,9 +393,9 @@ function App() {
           ) : (
             tags.map((tag) => (
               <button
-                className={`side-item ${tagFilter === tag ? "active" : ""}`}
+                className={`side-item ${tagFilters.has(tag) ? "active" : ""}`}
                 key={tag}
-                onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
+                onClick={() => toggleTagFilter(tag)}
               >
                 <Tag size={15} />
                 {tag}
@@ -311,8 +415,31 @@ function App() {
             <h1>{activeFolderName}</h1>
             <div className="header-meta">
               {filteredItems.length}개 항목
-              {tagFilter ? ` · #${tagFilter}` : ""}
+              {activeTagFilters.length > 0 ? ` · ${activeTagFilters.map((tag) => `#${tag}`).join(" + ")}` : ""}
             </div>
+          </div>
+          <div className="library-controls">
+            <div className="view-toggle" aria-label="보기 모드">
+              <button className={viewMode === "grid" ? "active" : ""} title="그리드 보기" onClick={() => setViewMode("grid")}>
+                <Grid2X2 size={16} />
+              </button>
+              <button className={viewMode === "list" ? "active" : ""} title="리스트 보기" onClick={() => setViewMode("list")}>
+                <List size={16} />
+              </button>
+            </div>
+            {viewMode === "grid" && (
+              <label className="thumb-size">
+                <ImageIcon size={16} />
+                <input
+                  type="range"
+                  min="124"
+                  max="260"
+                  step="12"
+                  value={thumbSize}
+                  onChange={(event) => setThumbSize(Number(event.target.value))}
+                />
+              </label>
+            )}
           </div>
           {error && (
             <button className="error-pill" onClick={() => setError(null)}>
@@ -321,18 +448,59 @@ function App() {
           )}
         </header>
 
+        <div className="selection-bar">
+          <div className="selection-count">{selectedItems.length > 0 ? `${selectedItems.length}개 선택됨` : "선택 없음"}</div>
+          <button className="secondary-button compact" onClick={selectAllVisible} disabled={filteredItems.length === 0}>
+            전체 선택
+          </button>
+          <button className="secondary-button compact" onClick={clearSelection} disabled={selectedItems.length === 0}>
+            선택 해제
+          </button>
+          <label className="bulk-tag-field">
+            <Tag size={15} />
+            <input
+              value={bulkTags}
+              onChange={(event) => setBulkTags(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  applyBulkTags();
+                }
+              }}
+              placeholder="선택 항목에 태그 추가"
+            />
+          </label>
+          <button className="primary-button compact" onClick={applyBulkTags} disabled={selectedItems.length === 0 || !bulkTags.trim() || busy}>
+            태그 부여
+          </button>
+        </div>
+
         <section className="content-row">
-          <div className="grid-wrap">
+          <div className="grid-wrap" style={{ "--thumb-min": `${thumbSize}px` } as CSSProperties}>
             {filteredItems.length === 0 ? (
               <EmptyState onImport={handleImport} disabled={busy} />
+            ) : viewMode === "list" ? (
+              <div className="media-list">
+                {filteredItems.map((item) => (
+                  <MediaListRow
+                    item={item}
+                    key={item.id}
+                    selected={selectedIds.has(item.id)}
+                    onSelect={(event) => selectItem(item.id, event)}
+                    onToggle={(event) => selectItem(item.id, event, true)}
+                    onOpen={() => setViewerId(item.id)}
+                  />
+                ))}
+              </div>
             ) : (
               <div className="media-grid">
                 {filteredItems.map((item) => (
                   <MediaTile
                     item={item}
                     key={item.id}
-                    selected={item.id === selectedId}
-                    onSelect={() => setSelectedId(item.id)}
+                    selected={selectedIds.has(item.id)}
+                    onSelect={(event) => selectItem(item.id, event)}
+                    onToggle={(event) => selectItem(item.id, event, true)}
                     onOpen={() => setViewerId(item.id)}
                   />
                 ))}
@@ -345,7 +513,7 @@ function App() {
               item={selectedItem}
               library={library}
               busy={busy}
-              onClose={() => setSelectedId(null)}
+              onClose={clearSelection}
               onOpen={() => setViewerId(selectedItem.id)}
               onLibrary={setLibrary}
               run={run}
@@ -359,7 +527,10 @@ function App() {
           items={filteredItems}
           startId={viewerId}
           onClose={() => setViewerId(null)}
-          onSelect={(itemId) => setSelectedId(itemId)}
+          onSelect={(itemId) => {
+            setSelectedIds(new Set([itemId]));
+            setLastSelectedId(itemId);
+          }}
           onLibrary={setLibrary}
         />
       )}
@@ -464,22 +635,40 @@ function EmptyState({ onImport, disabled }: { onImport: () => void; disabled: bo
 interface MediaTileProps {
   item: MediaRecord;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (event: MouseEvent) => void;
+  onToggle: (event: MouseEvent) => void;
   onOpen: () => void;
 }
 
-function MediaTile({ item, selected, onSelect, onOpen }: MediaTileProps) {
+function MediaTile({ item, selected, onSelect, onToggle, onOpen }: MediaTileProps) {
   function click(event: MouseEvent): void {
     if (event.detail === 2) {
       onOpen();
       return;
     }
-    onSelect();
+    onSelect(event);
   }
 
   return (
     <article className={`media-tile ${selected ? "selected" : ""}`} onClick={click}>
-      <button className="thumb" title="열기" onClick={onOpen}>
+      <button
+        className={`select-dot ${selected ? "checked" : ""}`}
+        title={selected ? "선택 해제" : "선택"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle(event);
+        }}
+      >
+        {selected ? "✓" : ""}
+      </button>
+      <button
+        className="thumb"
+        title="열기"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen();
+        }}
+      >
         {item.kind === "video" ? (
           <>
             <video src={mediaSrc(item.id)} preload="metadata" muted />
@@ -504,6 +693,68 @@ function MediaTile({ item, selected, onSelect, onOpen }: MediaTileProps) {
           ))}
         </div>
       )}
+    </article>
+  );
+}
+
+interface MediaListRowProps {
+  item: MediaRecord;
+  selected: boolean;
+  onSelect: (event: MouseEvent) => void;
+  onToggle: (event: MouseEvent) => void;
+  onOpen: () => void;
+}
+
+function MediaListRow({ item, selected, onSelect, onToggle, onOpen }: MediaListRowProps) {
+  function click(event: MouseEvent): void {
+    if (event.detail === 2) {
+      onOpen();
+      return;
+    }
+    onSelect(event);
+  }
+
+  return (
+    <article className={`media-row ${selected ? "selected" : ""}`} onClick={click}>
+      <button
+        className={`select-dot ${selected ? "checked" : ""}`}
+        title={selected ? "선택 해제" : "선택"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle(event);
+        }}
+      >
+        {selected ? "✓" : ""}
+      </button>
+      <button
+        className="row-thumb"
+        title="열기"
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpen();
+        }}
+      >
+        {item.kind === "video" ? <video src={mediaSrc(item.id)} preload="metadata" muted /> : <img src={mediaSrc(item.id)} alt="" />}
+      </button>
+      <div className="row-main">
+        <div className="row-name" title={item.displayName}>
+          {item.displayName}
+        </div>
+        <div className="row-sub">
+          {item.kind === "video" ? "영상" : "이미지"} · {formatBytes(item.size)} · {formatDate(item.importedAt)}
+        </div>
+      </div>
+      <div className="row-tags">
+        {item.tags.length === 0 ? (
+          <span className="row-muted">태그 없음</span>
+        ) : (
+          item.tags.slice(0, 5).map((tag) => <span key={tag}>#{tag}</span>)
+        )}
+      </div>
+      <div className="row-likes">
+        <Heart size={14} />
+        {item.likes}
+      </div>
     </article>
   );
 }
