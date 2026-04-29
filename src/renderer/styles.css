@@ -230,6 +230,11 @@ button {
   background: #303831;
 }
 
+.secondary-button.active {
+  background: #79b791;
+  color: #101311;
+}
+
 .secondary-button.compact {
   min-height: 30px;
   padding: 0 9px;
@@ -425,6 +430,7 @@ button {
 .library-controls,
 .view-toggle,
 .thumb-size,
+.auto-tag-toggle,
 .selection-bar,
 .bulk-tag-field {
   display: flex;
@@ -469,6 +475,18 @@ button {
 
 .thumb-size input {
   width: 118px;
+  accent-color: #79b791;
+}
+
+.auto-tag-toggle {
+  height: 30px;
+  gap: 7px;
+  color: #b8b1a2;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.auto-tag-toggle input {
   accent-color: #79b791;
 }
 
@@ -596,6 +614,14 @@ button {
   font-size: 14px;
   font-weight: 800;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.show-selection .select-dot {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .select-dot.checked {
@@ -963,7 +989,8 @@ button {
 
 .viewer-chip,
 .viewer-remaining,
-.viewer-segment button {
+.viewer-segment button,
+.viewer-timer {
   min-height: 34px;
   padding: 0 10px;
   display: inline-flex;
@@ -1008,6 +1035,24 @@ button {
 .viewer-remaining {
   color: #d8d8d8;
   pointer-events: none;
+}
+
+.viewer-timer {
+  gap: 7px;
+}
+
+.viewer-timer input[type="range"] {
+  width: 84px;
+  accent-color: #79b791;
+}
+
+.viewer-timer input[type="number"] {
+  width: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  text-align: right;
 }
 
 .viewer-title span {

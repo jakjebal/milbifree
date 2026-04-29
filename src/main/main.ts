@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, protocol, session } from "electron";
 import path from "node:path";
-import type { FolderPatch, MediaPatch } from "../shared/types";
+import type { FolderPatch, MediaPatch, OrientationUpdate } from "../shared/types";
 import { VaultManager } from "./vault";
 
 protocol.registerSchemesAsPrivileged([
@@ -85,6 +85,7 @@ function registerIpc(): void {
   handle("media:importPaths", (filePaths: string[], folderId?: string) => vault.importMediaPaths(filePaths, folderId));
   handle("media:like", (itemId: string) => vault.likeMedia(itemId));
   handle("media:addTags", (itemIds: string[], tags: string[]) => vault.addTagsToMedia(itemIds, tags));
+  handle("media:tagOrientations", (updates: OrientationUpdate[]) => vault.tagMediaOrientations(updates));
   handle("media:update", (itemId: string, patch: MediaPatch) => vault.updateMedia(itemId, patch));
   handle("media:delete", (itemId: string) => vault.deleteMedia(itemId));
   handle("viewer:fullscreen", (fullscreen: boolean) => {

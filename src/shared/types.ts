@@ -1,4 +1,5 @@
 export type MediaKind = "image" | "video";
+export type MediaOrientation = "landscape" | "portrait" | "square";
 
 export interface FolderRecord {
   id: string;
@@ -40,6 +41,11 @@ export interface MediaPatch {
   folderId?: string;
   displayName?: string;
   tags?: string[];
+}
+
+export interface OrientationUpdate {
+  id: string;
+  orientation: MediaOrientation;
 }
 
 export interface FolderPatch {

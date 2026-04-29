@@ -11,6 +11,7 @@ import type {
   LibraryState,
   MediaPatch,
   MediaRecord,
+  OrientationUpdate,
   VaultStatus
 } from "../shared/types";
 
@@ -21,6 +22,11 @@ const CONFIG_FILE = "config.json";
 const SETTINGS_FILE = "settings.json";
 const FILES_DIR = "files";
 const execFileAsync = promisify(execFile);
+const ORIENTATION_TAGS = {
+  landscape: "가로",
+  portrait: "세로",
+  square: "정방형"
+} as const;
 
 const KDF = {
   name: "scrypt",
@@ -405,6 +411,24 @@ export class VaultManager {
     for (const item of library.items) {
       if (targetIds.has(item.id)) {
         item.tags = normalizeTags([...item.tags, ...cleanTags]);
+      }
+    }
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
+  async tagMediaOrientations(updates: OrientationUpdate[]): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    if (updates.length === 0) {
+      return this.snapshot();
+    }
+
+    const orientationTags = new Set<string>(Object.values(ORIENTATION_TAGS));
+    const updateMap = new Map(updates.map((update) => [update.id, update.orientation]));
+    for (const item of library.items) {
+      const orientation = updateMap.get(item.id);
+      if (orientation) {
+        item.tags = normalizeTags([...item.tags.filter((tag) => !orientationTags.has(tag)), ORIENTATION_TAGS[orientation]]);
       }
     }
     await this.saveLibrary();

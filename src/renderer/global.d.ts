@@ -1,4 +1,4 @@
-import type { FolderPatch, ImportResult, LibraryState, MediaPatch, VaultStatus } from "../shared/types";
+import type { FolderPatch, ImportResult, LibraryState, MediaPatch, OrientationUpdate, VaultStatus } from "../shared/types";
 
 export {};
 
@@ -18,6 +18,7 @@ declare global {
       importDroppedMedia: (filePaths: string[], folderId?: string) => Promise<ImportResult>;
       likeMedia: (itemId: string) => Promise<LibraryState>;
       addTagsToMedia: (itemIds: string[], tags: string[]) => Promise<LibraryState>;
+      tagMediaOrientations: (updates: OrientationUpdate[]) => Promise<LibraryState>;
       updateMedia: (itemId: string, patch: MediaPatch) => Promise<LibraryState>;
       deleteMedia: (itemId: string) => Promise<LibraryState>;
       setViewerFullscreen: (fullscreen: boolean) => Promise<boolean>;

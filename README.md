@@ -15,6 +15,8 @@ Windows and macOS.
 - Folder filtering, multi-tag filtering, sidebar search, thumbnail grid, and list view
 - Adjustable thumbnail size
 - Multi-select, select all visible items, and bulk tag assignment
+- Optional selection mode that keeps thumbnail checkboxes hidden until needed
+- Automatic landscape/portrait/square tagging on import, with manual re-tagging for existing content
 - Per-item name, folder, and tag editing
 - Cumulative per-item likes
 - Fullscreen viewing with minimal chrome
@@ -28,6 +30,9 @@ Windows and macOS.
   - `Fit screen`, `fit width`, and `fit height` modes
   - `Ctrl` + mouse wheel: zoom image from 100% to 600%
   - Mouse wheel / trackpad scroll: pan around a zoomed image
+- Viewer auto-advance:
+  - Videos advance when playback ends
+  - Images can advance on a user-set timer
 
 ## Security Model
 

@@ -20,12 +20,13 @@ import {
   Search,
   Shuffle,
   Tag,
+  Timer,
   Trash2,
   Video,
   X
 } from "lucide-react";
 import { CSSProperties, DragEvent, FormEvent, MouseEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { ImportResult, LibraryState, MediaRecord, VaultStatus } from "../shared/types";
+import type { ImportResult, LibraryState, MediaOrientation, MediaRecord, OrientationUpdate, VaultStatus } from "../shared/types";
 
 const ALL_SCOPE = "all";
 const ROOT_FOLDER_ID = "root";
@@ -73,8 +74,10 @@ function App() {
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [viewerId, setViewerId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [selectionMode, setSelectionMode] = useState(false);
   const [thumbSize, setThumbSize] = useState(168);
   const [bulkTags, setBulkTags] = useState("");
+  const [autoOrientationTagging, setAutoOrientationTagging] = useState(true);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,12 +127,12 @@ function App() {
     });
   }, [filteredItems]);
 
-  async function run<T>(task: () => Promise<T>, onSuccess?: (value: T) => void): Promise<void> {
+  async function run<T>(task: () => Promise<T>, onSuccess?: (value: T) => void | Promise<void>): Promise<void> {
     setBusy(true);
     setError(null);
     try {
       const value = await task();
-      onSuccess?.(value);
+      await onSuccess?.(value);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -142,6 +145,11 @@ function App() {
     setLastSelectedId(null);
   }
 
+  function closeSelectionMode(): void {
+    setSelectionMode(false);
+    clearSelection();
+  }
+
   function parseTagInput(value: string): string[] {
     return value
       .split(",")
@@ -150,8 +158,12 @@ function App() {
   }
 
   function selectItem(itemId: string, event?: MouseEvent, forceToggle = false): void {
-    const additive = forceToggle || event?.metaKey || event?.ctrlKey;
+    const enteringSelection = forceToggle || Boolean(event?.shiftKey || event?.metaKey || event?.ctrlKey);
+    const additive = selectionMode || forceToggle || event?.metaKey || event?.ctrlKey;
     const range = event?.shiftKey && lastSelectedId;
+    if (enteringSelection) {
+      setSelectionMode(true);
+    }
 
     if (range) {
       const start = filteredItems.findIndex((item) => item.id === lastSelectedId);
@@ -195,6 +207,7 @@ function App() {
   }
 
   function selectAllVisible(): void {
+    setSelectionMode(true);
     setSelectedIds(new Set(filteredItems.map((item) => item.id)));
     setLastSelectedId(filteredItems.at(-1)?.id ?? null);
   }
@@ -210,6 +223,67 @@ function App() {
         setBulkTags("");
       }
     );
+  }
+
+  function orientationForSize(width: number, height: number): MediaOrientation {
+    const ratioGap = Math.abs(width - height) / Math.max(width, height);
+    if (ratioGap < 0.05) return "square";
+    return width > height ? "landscape" : "portrait";
+  }
+
+  function readMediaOrientation(item: MediaRecord): Promise<OrientationUpdate | null> {
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => resolve(null), 8000);
+      const finish = (width: number, height: number) => {
+        window.clearTimeout(timeout);
+        resolve(width > 0 && height > 0 ? { id: item.id, orientation: orientationForSize(width, height) } : null);
+      };
+
+      if (item.kind === "image") {
+        const image = new Image();
+        image.onload = () => finish(image.naturalWidth, image.naturalHeight);
+        image.onerror = () => {
+          window.clearTimeout(timeout);
+          resolve(null);
+        };
+        image.src = mediaSrc(item.id);
+        return;
+      }
+
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.muted = true;
+      video.onloadedmetadata = () => finish(video.videoWidth, video.videoHeight);
+      video.onerror = () => {
+        window.clearTimeout(timeout);
+        resolve(null);
+      };
+      video.src = mediaSrc(item.id);
+    });
+  }
+
+  async function detectOrientations(items: MediaRecord[]): Promise<OrientationUpdate[]> {
+    const updates: OrientationUpdate[] = [];
+    for (const item of items) {
+      const update = await readMediaOrientation(item);
+      if (update) {
+        updates.push(update);
+      }
+    }
+    return updates;
+  }
+
+  async function tagOrientations(items: MediaRecord[]): Promise<LibraryState> {
+    const updates = await detectOrientations(items);
+    if (updates.length === 0) {
+      return window.milbi.getLibrary();
+    }
+    return window.milbi.tagMediaOrientations(updates);
+  }
+
+  function refreshOrientationTags(items: MediaRecord[]): void {
+    if (items.length === 0) return;
+    void run(() => tagOrientations(items), setLibrary);
   }
 
   async function handleUnlock(nextLibrary: LibraryState): Promise<void> {
@@ -243,9 +317,13 @@ function App() {
     return scope === ALL_SCOPE ? ROOT_FOLDER_ID : scope;
   }
 
-  function handleImportResult(result: ImportResult): void {
+  async function handleImportResult(result: ImportResult): Promise<void> {
     if (result.imported.length > 0) {
-      void window.milbi.getLibrary().then(setLibrary);
+      if (autoOrientationTagging) {
+        setLibrary(await tagOrientations(result.imported));
+      } else {
+        setLibrary(await window.milbi.getLibrary());
+      }
     }
     if (result.skipped.length > 0) {
       setError(`가져오지 못한 파일: ${result.skipped.join(", ")}`);
@@ -419,6 +497,18 @@ function App() {
             </div>
           </div>
           <div className="library-controls">
+            <button
+              className={`secondary-button compact ${selectionMode ? "active" : ""}`}
+              onClick={() => {
+                if (selectionMode) {
+                  closeSelectionMode();
+                } else {
+                  setSelectionMode(true);
+                }
+              }}
+            >
+              선택
+            </button>
             <div className="view-toggle" aria-label="보기 모드">
               <button className={viewMode === "grid" ? "active" : ""} title="그리드 보기" onClick={() => setViewMode("grid")}>
                 <Grid2X2 size={16} />
@@ -440,6 +530,21 @@ function App() {
                 />
               </label>
             )}
+            <label className="auto-tag-toggle">
+              <input
+                type="checkbox"
+                checked={autoOrientationTagging}
+                onChange={(event) => setAutoOrientationTagging(event.target.checked)}
+              />
+              방향 자동태그
+            </label>
+            <button
+              className="secondary-button compact"
+              onClick={() => refreshOrientationTags(library.items)}
+              disabled={busy || library.items.length === 0}
+            >
+              방향 태그 갱신
+            </button>
           </div>
           {error && (
             <button className="error-pill" onClick={() => setError(null)}>
@@ -453,7 +558,7 @@ function App() {
           <button className="secondary-button compact" onClick={selectAllVisible} disabled={filteredItems.length === 0}>
             전체 선택
           </button>
-          <button className="secondary-button compact" onClick={clearSelection} disabled={selectedItems.length === 0}>
+          <button className="secondary-button compact" onClick={closeSelectionMode} disabled={!selectionMode && selectedItems.length === 0}>
             선택 해제
           </button>
           <label className="bulk-tag-field">
@@ -486,6 +591,7 @@ function App() {
                     item={item}
                     key={item.id}
                     selected={selectedIds.has(item.id)}
+                    showSelection={selectionMode}
                     onSelect={(event) => selectItem(item.id, event)}
                     onToggle={(event) => selectItem(item.id, event, true)}
                     onOpen={() => setViewerId(item.id)}
@@ -499,6 +605,7 @@ function App() {
                     item={item}
                     key={item.id}
                     selected={selectedIds.has(item.id)}
+                    showSelection={selectionMode}
                     onSelect={(event) => selectItem(item.id, event)}
                     onToggle={(event) => selectItem(item.id, event, true)}
                     onOpen={() => setViewerId(item.id)}
@@ -551,7 +658,7 @@ interface LockScreenProps {
   status: VaultStatus;
   busy: boolean;
   error: string | null;
-  run: <T>(task: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<void>;
+  run: <T>(task: () => Promise<T>, onSuccess?: (value: T) => void | Promise<void>) => Promise<void>;
   onReady: (library: LibraryState) => Promise<void>;
   onStatus: (status: VaultStatus) => void;
 }
@@ -635,12 +742,13 @@ function EmptyState({ onImport, disabled }: { onImport: () => void; disabled: bo
 interface MediaTileProps {
   item: MediaRecord;
   selected: boolean;
+  showSelection: boolean;
   onSelect: (event: MouseEvent) => void;
   onToggle: (event: MouseEvent) => void;
   onOpen: () => void;
 }
 
-function MediaTile({ item, selected, onSelect, onToggle, onOpen }: MediaTileProps) {
+function MediaTile({ item, selected, showSelection, onSelect, onToggle, onOpen }: MediaTileProps) {
   function click(event: MouseEvent): void {
     if (event.detail === 2) {
       onOpen();
@@ -650,7 +758,7 @@ function MediaTile({ item, selected, onSelect, onToggle, onOpen }: MediaTileProp
   }
 
   return (
-    <article className={`media-tile ${selected ? "selected" : ""}`} onClick={click}>
+    <article className={`media-tile ${selected ? "selected" : ""} ${showSelection ? "show-selection" : ""}`} onClick={click}>
       <button
         className={`select-dot ${selected ? "checked" : ""}`}
         title={selected ? "선택 해제" : "선택"}
@@ -700,12 +808,13 @@ function MediaTile({ item, selected, onSelect, onToggle, onOpen }: MediaTileProp
 interface MediaListRowProps {
   item: MediaRecord;
   selected: boolean;
+  showSelection: boolean;
   onSelect: (event: MouseEvent) => void;
   onToggle: (event: MouseEvent) => void;
   onOpen: () => void;
 }
 
-function MediaListRow({ item, selected, onSelect, onToggle, onOpen }: MediaListRowProps) {
+function MediaListRow({ item, selected, showSelection, onSelect, onToggle, onOpen }: MediaListRowProps) {
   function click(event: MouseEvent): void {
     if (event.detail === 2) {
       onOpen();
@@ -715,7 +824,7 @@ function MediaListRow({ item, selected, onSelect, onToggle, onOpen }: MediaListR
   }
 
   return (
-    <article className={`media-row ${selected ? "selected" : ""}`} onClick={click}>
+    <article className={`media-row ${selected ? "selected" : ""} ${showSelection ? "show-selection" : ""}`} onClick={click}>
       <button
         className={`select-dot ${selected ? "checked" : ""}`}
         title={selected ? "선택 해제" : "선택"}
@@ -766,7 +875,7 @@ interface InspectorProps {
   onClose: () => void;
   onOpen: () => void;
   onLibrary: (library: LibraryState) => void;
-  run: <T>(task: () => Promise<T>, onSuccess?: (value: T) => void) => Promise<void>;
+  run: <T>(task: () => Promise<T>, onSuccess?: (value: T) => void | Promise<void>) => Promise<void>;
 }
 
 function Inspector({ item, library, busy, onClose, onOpen, onLibrary, run }: InspectorProps) {
@@ -882,6 +991,8 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
   const [playing, setPlaying] = useState(true);
   const [imageZoom, setImageZoom] = useState(1);
   const [imageFitMode, setImageFitMode] = useState<ImageFitMode>("fit-screen");
+  const [autoAdvance, setAutoAdvance] = useState(false);
+  const [imageAdvanceSeconds, setImageAdvanceSeconds] = useState(5);
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [randomMode, setRandomMode] = useState(false);
@@ -1079,6 +1190,12 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
   }, [current?.id]);
 
   useEffect(() => {
+    if (!autoAdvance || current?.kind !== "image") return;
+    const timer = window.setTimeout(() => go(1), imageAdvanceSeconds * 1000);
+    return () => window.clearTimeout(timer);
+  }, [autoAdvance, current?.id, current?.kind, imageAdvanceSeconds, excludeSeen, historyIndex, items, randomHistory, randomMode, seenIds]);
+
+  useEffect(() => {
     const validIds = new Set(items.map((item) => item.id));
     if (items.length === 0) {
       onClose();
@@ -1150,6 +1267,7 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
             playsInline
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
+            onEnded={() => go(1)}
           />
         ) : (
           <div
@@ -1221,6 +1339,30 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
             <Heart size={15} />
             {currentLikes}
           </button>
+          <button className={`viewer-chip ${autoAdvance ? "active" : ""}`} title="이미지 자동 넘김" onClick={() => setAutoAdvance((enabled) => !enabled)}>
+            {autoAdvance ? <Pause size={15} /> : <Play size={15} />}
+            자동
+          </button>
+          {autoAdvance && (
+            <label className="viewer-timer" title="이미지 자동 넘김 시간">
+              <Timer size={15} />
+              <input
+                type="range"
+                min="1"
+                max="30"
+                value={imageAdvanceSeconds}
+                onChange={(event) => setImageAdvanceSeconds(Number(event.target.value))}
+              />
+              <input
+                type="number"
+                min="1"
+                max="300"
+                value={imageAdvanceSeconds}
+                onChange={(event) => setImageAdvanceSeconds(Math.max(1, Number(event.target.value) || 1))}
+              />
+              <span>초</span>
+            </label>
+          )}
           <button className={`viewer-chip ${randomMode ? "active" : ""}`} title="랜덤 넘기기" onClick={toggleRandomMode}>
             <Shuffle size={15} />
             랜덤
