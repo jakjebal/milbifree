@@ -29,7 +29,10 @@ import { CSSProperties, DragEvent, FormEvent, MouseEvent, WheelEvent, useEffect,
 import type { ImportResult, LibraryState, MediaOrientation, MediaRecord, OrientationUpdate, VaultStatus } from "../shared/types";
 
 const ALL_SCOPE = "all";
+const UNTAGGED_SCOPE = "untagged";
+const LIKED_SCOPE = "liked";
 const ROOT_FOLDER_ID = "root";
+const ORIENTATION_TAG_LABELS = new Set(["가로", "세로", "정방형"]);
 
 type Scope = typeof ALL_SCOPE | string;
 type ViewMode = "grid" | "list";
@@ -64,6 +67,14 @@ function uniqueTags(items: MediaRecord[]): string[] {
   return [...new Set(items.flatMap((item) => item.tags))].sort((a, b) => a.localeCompare(b));
 }
 
+function userTags(item: MediaRecord): string[] {
+  return item.tags.filter((tag) => !ORIENTATION_TAG_LABELS.has(tag));
+}
+
+function isSelectionGesture(event: MouseEvent, showSelection = false): boolean {
+  return showSelection || event.shiftKey || event.metaKey || event.ctrlKey;
+}
+
 function App() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [library, setLibrary] = useState<LibraryState | null>(null);
@@ -76,6 +87,7 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [selectionMode, setSelectionMode] = useState(false);
   const [thumbSize, setThumbSize] = useState(168);
+  const [minLikes, setMinLikes] = useState(0);
   const [bulkTags, setBulkTags] = useState("");
   const [autoOrientationTagging, setAutoOrientationTagging] = useState(true);
   const [draggingFiles, setDraggingFiles] = useState(false);
@@ -100,19 +112,26 @@ function App() {
   const filteredItems = useMemo(() => {
     const lowerQuery = query.trim().toLowerCase();
     return (library?.items ?? []).filter((item) => {
-      const inFolder = scope === ALL_SCOPE || item.folderId === scope;
+      const inScope =
+        scope === ALL_SCOPE ||
+        (scope === UNTAGGED_SCOPE && userTags(item).length === 0) ||
+        (scope === LIKED_SCOPE && item.likes > 0) ||
+        item.folderId === scope;
       const inTags = activeTagFilters.every((tag) => item.tags.includes(tag));
+      const inLikes = minLikes <= 0 || item.likes >= minLikes;
       const inSearch =
         !lowerQuery ||
         item.displayName.toLowerCase().includes(lowerQuery) ||
         item.originalName.toLowerCase().includes(lowerQuery) ||
         item.tags.some((tag) => tag.toLowerCase().includes(lowerQuery));
-      return inFolder && inTags && inSearch;
+      return inScope && inTags && inLikes && inSearch;
     });
-  }, [activeTagFilters, library, query, scope]);
+  }, [activeTagFilters, library, minLikes, query, scope]);
 
   const activeFolderName = useMemo(() => {
     if (!library || scope === ALL_SCOPE) return "전체";
+    if (scope === UNTAGGED_SCOPE) return "태그 없음";
+    if (scope === LIKED_SCOPE) return "좋아요";
     return library.folders.find((folder) => folder.id === scope)?.name ?? "폴더";
   }, [library, scope]);
 
@@ -314,7 +333,8 @@ function App() {
   }
 
   function targetFolderId(): string {
-    return scope === ALL_SCOPE ? ROOT_FOLDER_ID : scope;
+    if (scope === ALL_SCOPE || scope === UNTAGGED_SCOPE || scope === LIKED_SCOPE) return ROOT_FOLDER_ID;
+    return scope;
   }
 
   async function handleImportResult(result: ImportResult): Promise<void> {
@@ -427,6 +447,26 @@ function App() {
             <Folder size={16} />
             전체
           </button>
+          <button
+            className={`side-item ${scope === UNTAGGED_SCOPE ? "active" : ""}`}
+            onClick={() => {
+              setScope(UNTAGGED_SCOPE);
+              clearSelection();
+            }}
+          >
+            <Tag size={16} />
+            태그 없음
+          </button>
+          <button
+            className={`side-item ${scope === LIKED_SCOPE ? "active" : ""}`}
+            onClick={() => {
+              setScope(LIKED_SCOPE);
+              clearSelection();
+            }}
+          >
+            <Heart size={16} />
+            좋아요
+          </button>
           {library.folders
             .filter((folder) => folder.id !== ROOT_FOLDER_ID)
             .map((folder) => (
@@ -494,6 +534,7 @@ function App() {
             <div className="header-meta">
               {filteredItems.length}개 항목
               {activeTagFilters.length > 0 ? ` · ${activeTagFilters.map((tag) => `#${tag}`).join(" + ")}` : ""}
+              {minLikes > 0 ? ` · 좋아요 ${minLikes}+` : ""}
             </div>
           </div>
           <div className="library-controls">
@@ -530,6 +571,15 @@ function App() {
                 />
               </label>
             )}
+            <label className="likes-filter" title="최소 좋아요 수">
+              <Heart size={15} />
+              <input
+                type="number"
+                min="0"
+                value={minLikes}
+                onChange={(event) => setMinLikes(Math.max(0, Number(event.target.value) || 0))}
+              />
+            </label>
             <label className="auto-tag-toggle">
               <input
                 type="checkbox"
@@ -748,13 +798,69 @@ interface MediaTileProps {
   onOpen: () => void;
 }
 
+function LazyMediaPreview({ item, showVideoBadge = false }: { item: MediaRecord; showVideoBadge?: boolean }) {
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const previewRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    const target = previewRef.current;
+    if (!target || shouldLoad) return;
+    if (!("IntersectionObserver" in window)) {
+      setShouldLoad(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "260px 0px" }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [shouldLoad]);
+
+  return (
+    <span className="thumb-media" ref={previewRef}>
+      {shouldLoad ? (
+        item.kind === "video" ? (
+          <video src={mediaSrc(item.id)} preload="metadata" muted />
+        ) : (
+          <img src={mediaSrc(item.id)} alt="" loading="lazy" />
+        )
+      ) : (
+        <span className="thumb-placeholder" aria-hidden="true">
+          <ImageIcon size={18} />
+        </span>
+      )}
+      {showVideoBadge && item.kind === "video" && (
+        <span className="kind-badge">
+          <Video size={13} />
+        </span>
+      )}
+    </span>
+  );
+}
+
 function MediaTile({ item, selected, showSelection, onSelect, onToggle, onOpen }: MediaTileProps) {
   function click(event: MouseEvent): void {
-    if (event.detail === 2) {
+    if (event.detail === 2 && !isSelectionGesture(event, showSelection)) {
       onOpen();
       return;
     }
     onSelect(event);
+  }
+
+  function thumbnailClick(event: MouseEvent): void {
+    event.stopPropagation();
+    if (isSelectionGesture(event, showSelection)) {
+      onToggle(event);
+      return;
+    }
+    onOpen();
   }
 
   return (
@@ -772,21 +878,9 @@ function MediaTile({ item, selected, showSelection, onSelect, onToggle, onOpen }
       <button
         className="thumb"
         title="열기"
-        onClick={(event) => {
-          event.stopPropagation();
-          onOpen();
-        }}
+        onClick={thumbnailClick}
       >
-        {item.kind === "video" ? (
-          <>
-            <video src={mediaSrc(item.id)} preload="metadata" muted />
-            <span className="kind-badge">
-              <Video size={13} />
-            </span>
-          </>
-        ) : (
-          <img src={mediaSrc(item.id)} alt="" loading="lazy" />
-        )}
+        <LazyMediaPreview item={item} showVideoBadge />
       </button>
       <div className="tile-info">
         <div className="tile-name" title={item.displayName}>
@@ -816,11 +910,20 @@ interface MediaListRowProps {
 
 function MediaListRow({ item, selected, showSelection, onSelect, onToggle, onOpen }: MediaListRowProps) {
   function click(event: MouseEvent): void {
-    if (event.detail === 2) {
+    if (event.detail === 2 && !isSelectionGesture(event, showSelection)) {
       onOpen();
       return;
     }
     onSelect(event);
+  }
+
+  function thumbnailClick(event: MouseEvent): void {
+    event.stopPropagation();
+    if (isSelectionGesture(event, showSelection)) {
+      onToggle(event);
+      return;
+    }
+    onOpen();
   }
 
   return (
@@ -838,12 +941,9 @@ function MediaListRow({ item, selected, showSelection, onSelect, onToggle, onOpe
       <button
         className="row-thumb"
         title="열기"
-        onClick={(event) => {
-          event.stopPropagation();
-          onOpen();
-        }}
+        onClick={thumbnailClick}
       >
-        {item.kind === "video" ? <video src={mediaSrc(item.id)} preload="metadata" muted /> : <img src={mediaSrc(item.id)} alt="" />}
+        <LazyMediaPreview item={item} />
       </button>
       <div className="row-main">
         <div className="row-name" title={item.displayName}>
@@ -983,14 +1083,14 @@ interface ViewerProps {
   onLibrary: (library: LibraryState) => void;
 }
 
-type ImageFitMode = "fit-screen" | "fit-width" | "fit-height";
+type FitMode = "fit-screen" | "fit-width" | "fit-height";
 
 function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
   const [currentId, setCurrentId] = useState(startId);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [playing, setPlaying] = useState(true);
   const [imageZoom, setImageZoom] = useState(1);
-  const [imageFitMode, setImageFitMode] = useState<ImageFitMode>("fit-screen");
+  const [fitMode, setFitMode] = useState<FitMode>("fit-screen");
   const [autoAdvance, setAutoAdvance] = useState(false);
   const [imageAdvanceSeconds, setImageAdvanceSeconds] = useState(5);
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
@@ -1011,30 +1111,30 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
   const remainingRandomCount = Math.max(0, items.filter((item) => !seenIds.has(item.id)).length);
   const currentLikes = current?.likes ?? 0;
 
-  const fittedImageSize = useMemo(() => {
+  const fittedMediaSize = useMemo(() => {
     if (!naturalSize.width || !naturalSize.height || !stageSize.width || !stageSize.height) {
       return {
         canvasWidth: "100%",
         canvasHeight: "100%",
-        imageWidth: "100%",
-        imageHeight: "100%"
+        mediaWidth: "100%",
+        mediaHeight: "100%"
       };
     }
 
     const widthScale = stageSize.width / naturalSize.width;
     const heightScale = stageSize.height / naturalSize.height;
-    const baseScale =
-      imageFitMode === "fit-width" ? widthScale : imageFitMode === "fit-height" ? heightScale : Math.min(widthScale, heightScale);
-    const imageWidth = Math.max(1, Math.round(naturalSize.width * baseScale * imageZoom));
-    const imageHeight = Math.max(1, Math.round(naturalSize.height * baseScale * imageZoom));
+    const baseScale = fitMode === "fit-width" ? widthScale : fitMode === "fit-height" ? heightScale : Math.min(widthScale, heightScale);
+    const zoom = current?.kind === "image" ? imageZoom : 1;
+    const mediaWidth = Math.max(1, Math.round(naturalSize.width * baseScale * zoom));
+    const mediaHeight = Math.max(1, Math.round(naturalSize.height * baseScale * zoom));
 
     return {
-      canvasWidth: `${Math.max(stageSize.width, imageWidth)}px`,
-      canvasHeight: `${Math.max(stageSize.height, imageHeight)}px`,
-      imageWidth: `${imageWidth}px`,
-      imageHeight: `${imageHeight}px`
+      canvasWidth: `${Math.max(stageSize.width, mediaWidth)}px`,
+      canvasHeight: `${Math.max(stageSize.height, mediaHeight)}px`,
+      mediaWidth: `${mediaWidth}px`,
+      mediaHeight: `${mediaHeight}px`
     };
-  }, [imageFitMode, imageZoom, naturalSize, stageSize]);
+  }, [current?.kind, fitMode, imageZoom, naturalSize, stageSize]);
 
   function selectItem(itemId: string): void {
     setCurrentId(itemId);
@@ -1138,6 +1238,28 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
     revealChrome();
   }
 
+  function deleteCurrent(): void {
+    if (!current || !window.confirm("현재 항목을 보관함에서 삭제할까요?")) return;
+    const deletedId = current.id;
+    const remainingItems = items.filter((item) => item.id !== deletedId);
+    const nextId = remainingItems.length > 0 ? remainingItems[Math.min(currentIndex, remainingItems.length - 1)].id : null;
+
+    void window.milbi
+      .deleteMedia(deletedId)
+      .then((nextLibrary) => {
+        onLibrary(nextLibrary);
+        setSeenIds((existing) => new Set([...existing].filter((itemId) => itemId !== deletedId)));
+        setRandomHistory((history) => history.filter((itemId) => itemId !== deletedId));
+        if (!nextId) {
+          onClose();
+          return;
+        }
+        selectItem(nextId);
+      })
+      .catch(() => undefined);
+    revealChrome();
+  }
+
   function changeImageZoom(delta: number): void {
     setImageZoom((value) => Math.min(6, Math.max(1, Number((value + delta).toFixed(2)))));
   }
@@ -1181,7 +1303,7 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
     const observer = new ResizeObserver(updateSize);
     observer.observe(stage);
     return () => observer.disconnect();
-  }, [current?.kind]);
+  }, []);
 
   useEffect(() => {
     setImageZoom(1);
@@ -1236,6 +1358,9 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
       } else if (event.key.toLowerCase() === "l") {
         event.preventDefault();
         likeCurrent();
+      } else if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        deleteCurrent();
       } else if ((event.key === " " || event.key.toLowerCase() === "k") && current?.kind === "video") {
         event.preventDefault();
         toggleVideo();
@@ -1254,25 +1379,34 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
     <div ref={shellRef} className={`viewer ${chromeVisible ? "chrome" : ""}`} onMouseMove={revealChrome}>
       <div
         ref={stageRef}
-        className={`viewer-stage ${current.kind === "image" ? "image-stage" : ""}`}
+        className="viewer-stage media-stage"
         onClick={current.kind === "video" ? toggleVideo : undefined}
         onWheel={handleViewerWheel}
       >
         {current.kind === "video" ? (
-          <video
-            key={current.id}
-            ref={videoRef}
-            src={mediaSrc(current.id)}
-            autoPlay
-            playsInline
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onEnded={() => go(1)}
-          />
+          <div className="viewer-image-canvas" style={{ width: fittedMediaSize.canvasWidth, height: fittedMediaSize.canvasHeight } as CSSProperties}>
+            <video
+              key={current.id}
+              ref={videoRef}
+              src={mediaSrc(current.id)}
+              autoPlay
+              playsInline
+              onLoadedMetadata={(event) => {
+                setNaturalSize({
+                  width: event.currentTarget.videoWidth,
+                  height: event.currentTarget.videoHeight
+                });
+              }}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => go(1)}
+              style={{ width: fittedMediaSize.mediaWidth, height: fittedMediaSize.mediaHeight } as CSSProperties}
+            />
+          </div>
         ) : (
           <div
             className="viewer-image-canvas"
-            style={{ width: fittedImageSize.canvasWidth, height: fittedImageSize.canvasHeight } as CSSProperties}
+            style={{ width: fittedMediaSize.canvasWidth, height: fittedMediaSize.canvasHeight } as CSSProperties}
           >
             <img
               key={current.id}
@@ -1284,7 +1418,7 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
                   height: event.currentTarget.naturalHeight
                 });
               }}
-              style={{ width: fittedImageSize.imageWidth, height: fittedImageSize.imageHeight } as CSSProperties}
+              style={{ width: fittedMediaSize.mediaWidth, height: fittedMediaSize.mediaHeight } as CSSProperties}
             />
           </div>
         )}
@@ -1298,46 +1432,48 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
           </small>
         </div>
         <div className="viewer-controls">
-          {current.kind === "image" && (
-            <div className="viewer-segment" aria-label="이미지 맞춤">
-              <button
-                className={imageFitMode === "fit-screen" ? "active" : ""}
-                title="전체 이미지 맞춤"
-                onClick={() => {
-                  setImageFitMode("fit-screen");
-                  revealChrome();
-                }}
-              >
-                <Maximize2 size={15} />
-                전체
-              </button>
-              <button
-                className={imageFitMode === "fit-width" ? "active" : ""}
-                title="가로 맞춤"
-                onClick={() => {
-                  setImageFitMode("fit-width");
-                  revealChrome();
-                }}
-              >
-                <MoveHorizontal size={15} />
-                가로
-              </button>
-              <button
-                className={imageFitMode === "fit-height" ? "active" : ""}
-                title="세로 맞춤"
-                onClick={() => {
-                  setImageFitMode("fit-height");
-                  revealChrome();
-                }}
-              >
-                <MoveVertical size={15} />
-                세로
-              </button>
-            </div>
-          )}
+          <div className="viewer-segment" aria-label="미디어 맞춤">
+            <button
+              className={fitMode === "fit-screen" ? "active" : ""}
+              title="전체 맞춤"
+              onClick={() => {
+                setFitMode("fit-screen");
+                revealChrome();
+              }}
+            >
+              <Maximize2 size={15} />
+              전체
+            </button>
+            <button
+              className={fitMode === "fit-width" ? "active" : ""}
+              title="가로 맞춤"
+              onClick={() => {
+                setFitMode("fit-width");
+                revealChrome();
+              }}
+            >
+              <MoveHorizontal size={15} />
+              가로
+            </button>
+            <button
+              className={fitMode === "fit-height" ? "active" : ""}
+              title="세로 맞춤"
+              onClick={() => {
+                setFitMode("fit-height");
+                revealChrome();
+              }}
+            >
+              <MoveVertical size={15} />
+              세로
+            </button>
+          </div>
           <button className="viewer-chip" title="좋아요" onClick={likeCurrent}>
             <Heart size={15} />
             {currentLikes}
+          </button>
+          <button className="viewer-chip danger" title="삭제" onClick={deleteCurrent}>
+            <Trash2 size={15} />
+            삭제
           </button>
           <button className={`viewer-chip ${autoAdvance ? "active" : ""}`} title="이미지 자동 넘김" onClick={() => setAutoAdvance((enabled) => !enabled)}>
             {autoAdvance ? <Pause size={15} /> : <Play size={15} />}

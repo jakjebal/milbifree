@@ -12,21 +12,25 @@ Windows and macOS.
 - Encrypted library metadata
 - Image and video import through the native file picker
 - Drag-and-drop image and video import
-- Folder filtering, multi-tag filtering, sidebar search, thumbnail grid, and list view
+- Folder filtering, untagged/liked views, multi-tag filtering, sidebar search, thumbnail grid, and list view
 - Adjustable thumbnail size
 - Multi-select, select all visible items, and bulk tag assignment
+- Shift/Ctrl-click selection without opening content
 - Optional selection mode that keeps thumbnail checkboxes hidden until needed
 - Automatic landscape/portrait/square tagging on import, with manual re-tagging for existing content
 - Per-item name, folder, and tag editing
-- Cumulative per-item likes
+- Cumulative per-item likes with minimum-like filtering
+- Viewport-prioritized thumbnail loading
 - Fullscreen viewing with minimal chrome
 - Keyboard controls in viewing mode:
   - `ArrowRight` or `D`: next item
   - `ArrowLeft` or `A`: previous item
   - `Space` or `K`: play/pause video
+  - `L`: add like
+  - `Delete` or `Backspace`: delete current item
   - `Esc`: close viewer
 - Random viewing mode with an optional no-repeat toggle and remaining count
-- Image viewing controls:
+- Image and video viewing controls:
   - `Fit screen`, `fit width`, and `fit height` modes
   - `Ctrl` + mouse wheel: zoom image from 100% to 600%
   - Mouse wheel / trackpad scroll: pan around a zoomed image

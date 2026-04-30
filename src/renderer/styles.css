@@ -430,6 +430,7 @@ button {
 .library-controls,
 .view-toggle,
 .thumb-size,
+.likes-filter,
 .auto-tag-toggle,
 .selection-bar,
 .bulk-tag-field {
@@ -476,6 +477,23 @@ button {
 .thumb-size input {
   width: 118px;
   accent-color: #79b791;
+}
+
+.likes-filter {
+  height: 30px;
+  gap: 7px;
+  color: #928b7d;
+}
+
+.likes-filter input {
+  width: 46px;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid #333a34;
+  border-radius: 6px;
+  outline: 0;
+  background: #101311;
+  color: #ece8dc;
 }
 
 .auto-tag-toggle {
@@ -647,6 +665,24 @@ button {
   height: 100%;
   display: block;
   object-fit: cover;
+}
+
+.thumb-media,
+.thumb-placeholder {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.thumb-media {
+  position: relative;
+}
+
+.thumb-placeholder {
+  display: grid;
+  place-items: center;
+  color: #736d61;
+  background: #0a0c0b;
 }
 
 .kind-badge {
@@ -910,7 +946,7 @@ button {
   overflow: hidden;
 }
 
-.viewer-stage.image-stage {
+.viewer-stage.media-stage {
   display: block;
   overflow: auto;
   overscroll-behavior: contain;
@@ -932,7 +968,8 @@ button {
   object-fit: contain;
 }
 
-.viewer-image-canvas img {
+.viewer-image-canvas img,
+.viewer-image-canvas video {
   max-width: none;
   max-height: none;
   display: block;
@@ -963,6 +1000,8 @@ button {
   top: 16px;
   left: 16px;
   right: 16px;
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
 }
@@ -983,6 +1022,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
@@ -1015,6 +1055,11 @@ button {
 .viewer-segment button.active {
   background: rgba(121, 183, 145, 0.84);
   color: #09100c;
+}
+
+.viewer-chip.danger:hover {
+  background: rgba(196, 95, 95, 0.88);
+  color: #fff;
 }
 
 .viewer-segment {
