@@ -20,7 +20,7 @@ Windows and macOS.
 - Drag library items or dropped files onto a tier to assign that tier's minimum like score
 - Shift/Ctrl-click selection without opening content
 - Optional selection mode that keeps thumbnail checkboxes hidden until needed
-- Automatic landscape/portrait/square tagging on import, with manual re-tagging for existing content
+- Automatic image/video and landscape/portrait/square tagging on import, with migration for existing content
 - Per-item name, folder, and tag editing
 - Global tag rename/delete from the sidebar
 - Cumulative per-item likes with minimum-like filtering and increase/decrease controls

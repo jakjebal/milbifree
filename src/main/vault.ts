@@ -29,6 +29,10 @@ const ORIENTATION_TAGS = {
   portrait: "세로",
   square: "정방형"
 } as const;
+const MEDIA_KIND_TAGS = {
+  image: "이미지",
+  video: "동영상"
+} as const;
 
 const KDF = {
   name: "scrypt",
@@ -165,6 +169,11 @@ function mediaKindForMime(mimeType: string): MediaRecord["kind"] {
   return mimeType.startsWith("video/") ? "video" : "image";
 }
 
+function mediaKindTagsFor(item: MediaRecord): string[] {
+  const mediaKindTags = new Set<string>(Object.values(MEDIA_KIND_TAGS));
+  return normalizeTags([...item.tags.filter((tag) => !mediaKindTags.has(tag)), MEDIA_KIND_TAGS[item.kind]]);
+}
+
 export class VaultManager {
   private readonly userDataPath: string;
   private readonly defaultVaultRoot: string;
@@ -234,6 +243,7 @@ export class VaultManager {
     this.key = key;
     this.library = this.normalizeLibrary(library);
     await this.prepareVaultDirectory();
+    await this.saveLibrary();
     return this.snapshot();
   }
 
@@ -362,7 +372,7 @@ export class VaultManager {
           kind: mediaKindForMime(mimeType),
           size: file.byteLength,
           folderId,
-          tags: [],
+          tags: [MEDIA_KIND_TAGS[mediaKindForMime(mimeType)]],
           likes: 0,
           importedAt: Date.now()
         };
@@ -396,6 +406,7 @@ export class VaultManager {
     if (patch.tags !== undefined) {
       item.tags = normalizeTags(patch.tags);
     }
+    item.tags = mediaKindTagsFor(item);
     await this.saveLibrary();
     return this.snapshot();
   }
@@ -451,6 +462,7 @@ export class VaultManager {
     for (const item of library.items) {
       if (targetIds.has(item.id)) {
         item.tags = normalizeTags([...item.tags, ...cleanTags]);
+        item.tags = mediaKindTagsFor(item);
       }
     }
     await this.saveLibrary();
@@ -469,6 +481,7 @@ export class VaultManager {
       if (item.tags.includes(oldClean)) {
         item.tags = normalizeTags(item.tags.map((tag) => (tag === oldClean ? nextClean : tag)));
       }
+      item.tags = mediaKindTagsFor(item);
     }
     await this.saveLibrary();
     return this.snapshot();
@@ -483,6 +496,7 @@ export class VaultManager {
 
     for (const item of library.items) {
       item.tags = item.tags.filter((entry) => entry !== cleanTag);
+      item.tags = mediaKindTagsFor(item);
     }
     await this.saveLibrary();
     return this.snapshot();
@@ -500,6 +514,7 @@ export class VaultManager {
       const orientation = updateMap.get(item.id);
       if (orientation) {
         item.tags = normalizeTags([...item.tags.filter((tag) => !orientationTags.has(tag)), ORIENTATION_TAGS[orientation]]);
+        item.tags = mediaKindTagsFor(item);
       }
     }
     await this.saveLibrary();
@@ -640,6 +655,7 @@ export class VaultManager {
     }
     const items = (library.items ?? []).map((item) => ({
       ...item,
+      tags: mediaKindTagsFor(item),
       likes: item.likes ?? 0
     }));
     const validItemIds = new Set(items.map((item) => item.id));

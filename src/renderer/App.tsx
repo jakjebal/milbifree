@@ -36,7 +36,7 @@ const UNTAGGED_SCOPE = "untagged";
 const LIKED_SCOPE = "liked";
 const TIER_SCOPE_PREFIX = "tier:";
 const ROOT_FOLDER_ID = "root";
-const ORIENTATION_TAG_LABELS = new Set(["가로", "세로", "정방형"]);
+const SYSTEM_TAG_LABELS = new Set(["가로", "세로", "정방형", "이미지", "동영상"]);
 const MEDIA_DRAG_TYPE = "application/x-milbi-media-ids";
 const SCENARIO_DRAG_TYPE = "application/x-milbi-scenario-index";
 
@@ -103,7 +103,7 @@ function uniqueTags(items: MediaRecord[]): string[] {
 }
 
 function userTags(item: MediaRecord): string[] {
-  return item.tags.filter((tag) => !ORIENTATION_TAG_LABELS.has(tag));
+  return item.tags.filter((tag) => !SYSTEM_TAG_LABELS.has(tag));
 }
 
 function isSelectionGesture(event: MouseEvent, showSelection = false): boolean {
