@@ -779,6 +779,9 @@ button {
 
 .tile-meta {
   margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   color: #928b7d;
   font-size: 12px;
 }

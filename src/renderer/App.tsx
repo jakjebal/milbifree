@@ -1,4 +1,6 @@
 import {
+  ArrowDownUp,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -42,6 +44,7 @@ const SCENARIO_DRAG_TYPE = "application/x-milbi-scenario-index";
 
 type Scope = typeof ALL_SCOPE | string;
 type ViewMode = "grid" | "list";
+type DateSortOrder = "newest" | "oldest";
 type TierName = "S" | "A" | "B" | "C" | "D" | "E";
 type ViewerState = { startId: string; scenarioId?: string };
 
@@ -149,6 +152,8 @@ function App() {
   const [viewer, setViewer] = useState<ViewerState | null>(null);
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [dateSortOrder, setDateSortOrder] = useState<DateSortOrder>("newest");
+  const [showDates, setShowDates] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [thumbSize, setThumbSize] = useState(168);
   const [minLikes, setMinLikes] = useState(0);
@@ -176,23 +181,28 @@ function App() {
   const filteredItems = useMemo(() => {
     const lowerQuery = query.trim().toLowerCase();
     const activeTier = tierFromScope(scope);
-    return (library?.items ?? []).filter((item) => {
-      const inScope =
-        scope === ALL_SCOPE ||
-        (scope === UNTAGGED_SCOPE && userTags(item).length === 0) ||
-        (scope === LIKED_SCOPE && item.likes > 0) ||
-        (activeTier !== null && tierForLikes(item.likes ?? 0) === activeTier) ||
-        item.folderId === scope;
-      const inTags = activeTagFilters.every((tag) => item.tags.includes(tag));
-      const inLikes = minLikes <= 0 || item.likes >= minLikes;
-      const inSearch =
-        !lowerQuery ||
-        item.displayName.toLowerCase().includes(lowerQuery) ||
-        item.originalName.toLowerCase().includes(lowerQuery) ||
-        item.tags.some((tag) => tag.toLowerCase().includes(lowerQuery));
-      return inScope && inTags && inLikes && inSearch;
-    });
-  }, [activeTagFilters, library, minLikes, query, scope]);
+    return (library?.items ?? [])
+      .filter((item) => {
+        const inScope =
+          scope === ALL_SCOPE ||
+          (scope === UNTAGGED_SCOPE && userTags(item).length === 0) ||
+          (scope === LIKED_SCOPE && item.likes > 0) ||
+          (activeTier !== null && tierForLikes(item.likes ?? 0) === activeTier) ||
+          item.folderId === scope;
+        const inTags = activeTagFilters.every((tag) => item.tags.includes(tag));
+        const inLikes = minLikes <= 0 || item.likes >= minLikes;
+        const inSearch =
+          !lowerQuery ||
+          item.displayName.toLowerCase().includes(lowerQuery) ||
+          item.originalName.toLowerCase().includes(lowerQuery) ||
+          item.tags.some((tag) => tag.toLowerCase().includes(lowerQuery));
+        return inScope && inTags && inLikes && inSearch;
+      })
+      .sort((a, b) => {
+        const byDate = dateSortOrder === "newest" ? b.importedAt - a.importedAt : a.importedAt - b.importedAt;
+        return byDate || a.displayName.localeCompare(b.displayName);
+      });
+  }, [activeTagFilters, dateSortOrder, library, minLikes, query, scope]);
 
   const activeFolderName = useMemo(() => {
     if (!library || scope === ALL_SCOPE) return "전체";
@@ -822,6 +832,7 @@ function App() {
             <h1>{activeFolderName}</h1>
             <div className="header-meta">
               {filteredItems.length}개 항목
+              {` · ${dateSortOrder === "newest" ? "최신순" : "오래된순"}`}
               {activeTagFilters.length > 0 ? ` · ${activeTagFilters.map((tag) => `#${tag}`).join(" + ")}` : ""}
               {minLikes > 0 ? ` · 좋아요 ${minLikes}+` : ""}
             </div>
@@ -852,6 +863,22 @@ function App() {
                 <List size={16} />
               </button>
             </div>
+            <button
+              className="secondary-button compact"
+              title="추가 날짜 정렬"
+              onClick={() => setDateSortOrder((order) => (order === "newest" ? "oldest" : "newest"))}
+            >
+              <ArrowDownUp size={15} />
+              {dateSortOrder === "newest" ? "최신순" : "오래된순"}
+            </button>
+            <button
+              className={`secondary-button compact ${showDates ? "active" : ""}`}
+              title="추가 날짜 표시"
+              onClick={() => setShowDates((visible) => !visible)}
+            >
+              <CalendarDays size={15} />
+              날짜
+            </button>
             {viewMode === "grid" && (
               <label className="thumb-size">
                 <ImageIcon size={16} />
@@ -936,6 +963,7 @@ function App() {
                     key={item.id}
                     selected={selectedIds.has(item.id)}
                     showSelection={selectionMode}
+                    showDate={showDates}
                     onSelect={(event) => selectItem(item.id, event)}
                     onToggle={(event) => selectItem(item.id, event, true)}
                     onDragStart={(event) => handleMediaDragStart(item.id, event)}
@@ -951,6 +979,7 @@ function App() {
                     key={item.id}
                     selected={selectedIds.has(item.id)}
                     showSelection={selectionMode}
+                    showDate={showDates}
                     onSelect={(event) => selectItem(item.id, event)}
                     onToggle={(event) => selectItem(item.id, event, true)}
                     onDragStart={(event) => handleMediaDragStart(item.id, event)}
@@ -1103,6 +1132,7 @@ interface MediaTileProps {
   item: MediaRecord;
   selected: boolean;
   showSelection: boolean;
+  showDate: boolean;
   onSelect: (event: MouseEvent) => void;
   onToggle: (event: MouseEvent) => void;
   onDragStart: (event: DragEvent) => void;
@@ -1156,7 +1186,7 @@ function LazyMediaPreview({ item, showVideoBadge = false }: { item: MediaRecord;
   );
 }
 
-function MediaTile({ item, selected, showSelection, onSelect, onToggle, onDragStart, onOpen }: MediaTileProps) {
+function MediaTile({ item, selected, showSelection, showDate, onSelect, onToggle, onDragStart, onOpen }: MediaTileProps) {
   function click(event: MouseEvent): void {
     if (event.detail === 2 && !isSelectionGesture(event, showSelection)) {
       onOpen();
@@ -1202,7 +1232,10 @@ function MediaTile({ item, selected, showSelection, onSelect, onToggle, onDragSt
         <div className="tile-name" title={item.displayName}>
           {item.displayName}
         </div>
-        <div className="tile-meta">{formatBytes(item.size)}</div>
+        <div className="tile-meta">
+          <span>{formatBytes(item.size)}</span>
+          {showDate && <span>{formatDate(item.importedAt)}</span>}
+        </div>
       </div>
       {item.tags.length > 0 && (
         <div className="tag-row">
@@ -1219,13 +1252,14 @@ interface MediaListRowProps {
   item: MediaRecord;
   selected: boolean;
   showSelection: boolean;
+  showDate: boolean;
   onSelect: (event: MouseEvent) => void;
   onToggle: (event: MouseEvent) => void;
   onDragStart: (event: DragEvent) => void;
   onOpen: () => void;
 }
 
-function MediaListRow({ item, selected, showSelection, onSelect, onToggle, onDragStart, onOpen }: MediaListRowProps) {
+function MediaListRow({ item, selected, showSelection, showDate, onSelect, onToggle, onDragStart, onOpen }: MediaListRowProps) {
   function click(event: MouseEvent): void {
     if (event.detail === 2 && !isSelectionGesture(event, showSelection)) {
       onOpen();
@@ -1272,7 +1306,8 @@ function MediaListRow({ item, selected, showSelection, onSelect, onToggle, onDra
           {item.displayName}
         </div>
         <div className="row-sub">
-          {item.kind === "video" ? "영상" : "이미지"} · {formatBytes(item.size)} · {formatDate(item.importedAt)}
+          {item.kind === "video" ? "영상" : "이미지"} · {formatBytes(item.size)}
+          {showDate ? ` · ${formatDate(item.importedAt)}` : ""}
         </div>
       </div>
       <div className="row-tags">

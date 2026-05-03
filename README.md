@@ -13,6 +13,7 @@ Windows and macOS.
 - Image and video import through the native file picker
 - Drag-and-drop image and video import
 - Folder filtering, untagged/liked views, multi-tag filtering, sidebar search, thumbnail grid, and list view
+- Imported-date sorting with an optional date display toggle
 - Adjustable thumbnail size
 - Multi-select, select all visible items, and bulk tag assignment
 - Drag library items or dropped files onto tag filters to assign tags
