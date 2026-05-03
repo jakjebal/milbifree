@@ -19,6 +19,7 @@ Windows and macOS.
 - Drag library items or dropped files onto tag filters to assign tags
 - Tier filters based on cumulative likes: E=0, D=1-5, C=6-10, B=11-15, A=16-20, S=21+
 - Drag library items or dropped files onto a tier to assign that tier's minimum like score
+- Instant tier assignment buttons in the viewer
 - Shift/Ctrl-click selection without opening content
 - Optional selection mode that keeps thumbnail checkboxes hidden until needed
 - Automatic image/video and landscape/portrait/square tagging on import, with migration for existing content

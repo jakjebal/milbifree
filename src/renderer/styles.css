@@ -1228,6 +1228,7 @@ button {
 
 .viewer-chip,
 .viewer-remaining,
+.viewer-tier-picker button,
 .viewer-segment button,
 .viewer-timer {
   min-height: 34px;
@@ -1244,6 +1245,7 @@ button {
 }
 
 .viewer-chip,
+.viewer-tier-picker button,
 .viewer-segment button {
   cursor: pointer;
 }
@@ -1255,6 +1257,8 @@ button {
 
 .viewer-chip:hover:not(:disabled),
 .viewer-chip.active,
+.viewer-tier-picker button:hover,
+.viewer-tier-picker button.active,
 .viewer-segment button:hover,
 .viewer-segment button.active {
   background: rgba(121, 183, 145, 0.84);
@@ -1273,6 +1277,58 @@ button {
   padding: 2px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.32);
+}
+
+.viewer-tier-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.viewer-tier-picker button {
+  width: 30px;
+  min-height: 30px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.viewer-tier-picker button.tier-s.active,
+.viewer-tier-picker button.tier-s:hover {
+  background: #c95f5f;
+  color: #fff;
+}
+
+.viewer-tier-picker button.tier-a.active,
+.viewer-tier-picker button.tier-a:hover {
+  background: #e0a458;
+  color: #101311;
+}
+
+.viewer-tier-picker button.tier-b.active,
+.viewer-tier-picker button.tier-b:hover {
+  background: #79b791;
+  color: #101311;
+}
+
+.viewer-tier-picker button.tier-c.active,
+.viewer-tier-picker button.tier-c:hover {
+  background: #4f86c6;
+  color: #fff;
+}
+
+.viewer-tier-picker button.tier-d.active,
+.viewer-tier-picker button.tier-d:hover,
+.viewer-tier-picker button.tier-e.active,
+.viewer-tier-picker button.tier-e:hover {
+  background: #333a34;
+  color: #ece8dc;
 }
 
 .viewer-segment button {

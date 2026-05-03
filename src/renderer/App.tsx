@@ -1609,6 +1609,7 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
   const current = items[currentIndex] ?? items[0];
   const remainingRandomCount = Math.max(0, items.filter((item) => !seenIds.has(item.id)).length);
   const currentLikes = current?.likes ?? 0;
+  const currentTier = tierForLikes(currentLikes);
 
   const fittedMediaSize = useMemo(() => {
     if (!naturalSize.width || !naturalSize.height || !stageSize.width || !stageSize.height) {
@@ -1740,6 +1741,12 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
   function dislikeCurrent(): void {
     if (!current) return;
     void window.milbi.adjustMediaLikes([current.id], -1).then(onLibrary).catch(() => undefined);
+    revealChrome();
+  }
+
+  function setCurrentTier(tier: TierName): void {
+    if (!current) return;
+    void window.milbi.setMediaLikes([current.id], tierMinimum(tier)).then(onLibrary).catch(() => undefined);
     revealChrome();
   }
 
@@ -1974,6 +1981,18 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
               <MoveVertical size={15} />
               세로
             </button>
+          </div>
+          <div className="viewer-tier-picker" aria-label="티어 지정">
+            {TIERS.map((tier) => (
+              <button
+                className={`${currentTier === tier.name ? "active" : ""} tier-${tier.name.toLowerCase()}`}
+                key={tier.name}
+                title={`${tier.name} 티어로 지정 (${tier.label})`}
+                onClick={() => setCurrentTier(tier.name)}
+              >
+                {tier.name}
+              </button>
+            ))}
           </div>
           <button className="viewer-chip" title="좋아요" onClick={likeCurrent}>
             <Heart size={15} />
