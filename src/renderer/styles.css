@@ -241,6 +241,10 @@ button {
   font-size: 12px;
 }
 
+.secondary-button.danger {
+  color: #f0a6a6;
+}
+
 .primary-button:disabled,
 .secondary-button:disabled,
 .icon-button:disabled {
@@ -307,42 +311,98 @@ button {
   text-align: left;
 }
 
+.side-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .side-item:hover,
 .side-item.active {
   background: #252b26;
   color: #ece8dc;
 }
 
-.folder-row {
+.folder-row,
+.filter-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 28px 28px;
   align-items: center;
   border-radius: 6px;
 }
 
-.folder-row .side-item {
+.folder-row .side-item,
+.filter-row .side-item {
   min-width: 0;
   border-radius: 6px 0 0 6px;
 }
 
-.folder-row .icon-button {
+.folder-row .icon-button,
+.filter-row .icon-button {
   opacity: 0;
 }
 
 .folder-row:hover,
-.folder-row.active {
+.folder-row.active,
+.filter-row:hover,
+.filter-row.active {
   background: #252b26;
 }
 
 .folder-row:hover .side-item,
-.folder-row.active .side-item {
+.folder-row.active .side-item,
+.filter-row:hover .side-item,
+.filter-row.active .side-item {
   color: #ece8dc;
 }
 
 .folder-row:hover .icon-button,
 .folder-row:focus-within .icon-button,
-.folder-row.active .icon-button {
+.folder-row.active .icon-button,
+.filter-row:hover .icon-button,
+.filter-row:focus-within .icon-button,
+.filter-row.active .icon-button {
   opacity: 1;
+}
+
+.tier-item {
+  justify-content: flex-start;
+}
+
+.tier-mark {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #252b26;
+  color: #ece8dc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tier-s {
+  background: #c95f5f;
+}
+
+.tier-a {
+  background: #e0a458;
+  color: #101311;
+}
+
+.tier-b {
+  background: #79b791;
+  color: #101311;
+}
+
+.tier-c {
+  background: #4f86c6;
+}
+
+.tier-d,
+.tier-e {
+  background: #333a34;
 }
 
 .text-button {
@@ -658,7 +718,13 @@ button {
 }
 
 .thumb img,
-.thumb video,
+.thumb video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
 .preview-strip img,
 .preview-strip video {
   width: 100%;
@@ -782,7 +848,7 @@ button {
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .row-main,
@@ -919,9 +985,139 @@ button {
   word-break: break-word;
 }
 
+.like-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.like-stepper span {
+  min-width: 28px;
+  text-align: center;
+}
+
 .inspector-actions {
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.scenario-editor {
+  width: 380px;
+  height: 100%;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid #252b26;
+  background: #151916;
+}
+
+.scenario-head,
+.scenario-actions,
+.scenario-row {
+  display: flex;
+  align-items: center;
+}
+
+.scenario-head {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.scenario-head h2 {
+  max-width: 270px;
+  margin: 2px 0 0;
+  overflow: hidden;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-actions {
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.scenario-list {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.scenario-empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #333a34;
+  border-radius: 8px;
+  color: #736d61;
+  font-size: 13px;
+}
+
+.scenario-row {
+  min-width: 0;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #171b18;
+  cursor: grab;
+}
+
+.scenario-row:hover {
+  border-color: #79b791;
+}
+
+.scenario-index {
+  width: 24px;
+  color: #928b7d;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.scenario-thumb {
+  width: 54px;
+  aspect-ratio: 1 / 0.7;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: #0a0c0b;
+  cursor: pointer;
+}
+
+.scenario-thumb img,
+.scenario-thumb video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.scenario-row-main {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 3px;
+}
+
+.scenario-row-main span {
+  overflow: hidden;
+  color: #ece8dc;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-row-main small {
+  color: #928b7d;
+  font-size: 11px;
 }
 
 .viewer {
@@ -1049,7 +1245,12 @@ button {
   cursor: pointer;
 }
 
-.viewer-chip:hover,
+.viewer-chip:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.viewer-chip:hover:not(:disabled),
 .viewer-chip.active,
 .viewer-segment button:hover,
 .viewer-segment button.active {

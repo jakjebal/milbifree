@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, protocol, session } from "electron";
 import path from "node:path";
-import type { FolderPatch, MediaPatch, OrientationUpdate } from "../shared/types";
+import type { FolderPatch, MediaPatch, MediaRecord, OrientationUpdate, ScenarioPatch } from "../shared/types";
 import { VaultManager } from "./vault";
 
 protocol.registerSchemesAsPrivileged([
@@ -20,6 +20,54 @@ app.commandLine.appendSwitch("disable-http-cache");
 
 let mainWindow: BrowserWindow | null = null;
 let vault: VaultManager;
+
+function mediaResponse(item: MediaRecord, bytes: Buffer, request: Request): Response {
+  const size = bytes.byteLength;
+  const baseHeaders: Record<string, string> = {
+    "content-type": item.mimeType,
+    "cache-control": "no-store, private, max-age=0",
+    pragma: "no-cache",
+    "accept-ranges": "bytes"
+  };
+  const range = request.headers.get("range");
+
+  if (!range) {
+    return new Response(new Uint8Array(bytes), {
+      headers: {
+        ...baseHeaders,
+        "content-length": String(size)
+      }
+    });
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (!match) {
+    return new Response("Invalid range", { status: 416, headers: { ...baseHeaders, "content-range": `bytes */${size}` } });
+  }
+
+  let start = match[1] ? Number(match[1]) : 0;
+  let end = match[2] ? Number(match[2]) : size - 1;
+  if (!match[1] && match[2]) {
+    const suffixLength = Math.max(0, Number(match[2]));
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  }
+
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= size) {
+    return new Response("Range not satisfiable", { status: 416, headers: { ...baseHeaders, "content-range": `bytes */${size}` } });
+  }
+
+  const safeEnd = Math.min(end, size - 1);
+  const chunk = bytes.subarray(start, safeEnd + 1);
+  return new Response(new Uint8Array(chunk), {
+    status: 206,
+    headers: {
+      ...baseHeaders,
+      "content-length": String(chunk.byteLength),
+      "content-range": `bytes ${start}-${safeEnd}/${size}`
+    }
+  });
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -84,10 +132,17 @@ function registerIpc(): void {
   handle("media:import", (folderId?: string) => vault.importMedia(folderId));
   handle("media:importPaths", (filePaths: string[], folderId?: string) => vault.importMediaPaths(filePaths, folderId));
   handle("media:like", (itemId: string) => vault.likeMedia(itemId));
+  handle("media:adjustLikes", (itemIds: string[], delta: number) => vault.adjustMediaLikes(itemIds, delta));
+  handle("media:setLikes", (itemIds: string[], likes: number) => vault.setMediaLikes(itemIds, likes));
   handle("media:addTags", (itemIds: string[], tags: string[]) => vault.addTagsToMedia(itemIds, tags));
+  handle("tag:rename", (oldTag: string, nextTag: string) => vault.renameTag(oldTag, nextTag));
+  handle("tag:delete", (tag: string) => vault.deleteTag(tag));
   handle("media:tagOrientations", (updates: OrientationUpdate[]) => vault.tagMediaOrientations(updates));
   handle("media:update", (itemId: string, patch: MediaPatch) => vault.updateMedia(itemId, patch));
   handle("media:delete", (itemId: string) => vault.deleteMedia(itemId));
+  handle("scenario:create", (name: string) => vault.createScenario(name));
+  handle("scenario:update", (scenarioId: string, patch: ScenarioPatch) => vault.updateScenario(scenarioId, patch));
+  handle("scenario:delete", (scenarioId: string) => vault.deleteScenario(scenarioId));
   handle("viewer:fullscreen", (fullscreen: boolean) => {
     mainWindow?.setFullScreen(fullscreen);
     mainWindow?.setMenuBarVisibility(false);
@@ -110,13 +165,7 @@ app.whenReady().then(async () => {
     try {
       const itemId = decodeURIComponent(url.pathname.slice(1));
       const media = await vault.readMedia(itemId);
-      return new Response(new Uint8Array(media.bytes), {
-        headers: {
-          "content-type": media.item.mimeType,
-          "cache-control": "no-store, private, max-age=0",
-          pragma: "no-cache"
-        }
-      });
+      return mediaResponse(media.item, media.bytes, request);
     } catch {
       return new Response("Not found", { status: 404 });
     }

@@ -12,6 +12,8 @@ import type {
   MediaPatch,
   MediaRecord,
   OrientationUpdate,
+  ScenarioPatch,
+  ScenarioRecord,
   VaultStatus
 } from "../shared/types";
 
@@ -82,6 +84,10 @@ function normalizeTags(tags: string[]): string[] {
   return [...new Set(clean)].sort((a, b) => a.localeCompare(b));
 }
 
+function normalizeTag(tag: string): string | null {
+  return normalizeTags([tag])[0] ?? null;
+}
+
 function defaultLibrary(): LibraryState {
   return {
     folders: [
@@ -92,7 +98,8 @@ function defaultLibrary(): LibraryState {
         createdAt: Date.now()
       }
     ],
-    items: []
+    items: [],
+    scenarios: []
   };
 }
 
@@ -400,6 +407,39 @@ export class VaultManager {
     return this.snapshot();
   }
 
+  async adjustMediaLikes(itemIds: string[], delta: number): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    const targetIds = new Set(itemIds);
+    if (targetIds.size === 0 || !Number.isFinite(delta)) {
+      return this.snapshot();
+    }
+
+    for (const item of library.items) {
+      if (targetIds.has(item.id)) {
+        item.likes = Math.max(0, (item.likes ?? 0) + Math.trunc(delta));
+      }
+    }
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
+  async setMediaLikes(itemIds: string[], likes: number): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    const targetIds = new Set(itemIds);
+    if (targetIds.size === 0 || !Number.isFinite(likes)) {
+      return this.snapshot();
+    }
+
+    const nextLikes = Math.max(0, Math.trunc(likes));
+    for (const item of library.items) {
+      if (targetIds.has(item.id)) {
+        item.likes = nextLikes;
+      }
+    }
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
   async addTagsToMedia(itemIds: string[], tags: string[]): Promise<LibraryState> {
     const library = this.requireUnlocked();
     const cleanTags = normalizeTags(tags);
@@ -412,6 +452,37 @@ export class VaultManager {
       if (targetIds.has(item.id)) {
         item.tags = normalizeTags([...item.tags, ...cleanTags]);
       }
+    }
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
+  async renameTag(oldTag: string, nextTag: string): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    const oldClean = normalizeTag(oldTag);
+    const nextClean = normalizeTag(nextTag);
+    if (!oldClean || !nextClean) {
+      return this.snapshot();
+    }
+
+    for (const item of library.items) {
+      if (item.tags.includes(oldClean)) {
+        item.tags = normalizeTags(item.tags.map((tag) => (tag === oldClean ? nextClean : tag)));
+      }
+    }
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
+  async deleteTag(tag: string): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    const cleanTag = normalizeTag(tag);
+    if (!cleanTag) {
+      return this.snapshot();
+    }
+
+    for (const item of library.items) {
+      item.tags = item.tags.filter((entry) => entry !== cleanTag);
     }
     await this.saveLibrary();
     return this.snapshot();
@@ -440,6 +511,48 @@ export class VaultManager {
     const item = this.findItem(itemId);
     await fs.rm(this.mediaPath(item.id), { force: true });
     library.items = library.items.filter((entry) => entry.id !== itemId);
+    library.scenarios = (library.scenarios ?? []).map((scenario) => ({
+      ...scenario,
+      itemIds: scenario.itemIds.filter((entry) => entry !== itemId),
+      updatedAt: Date.now()
+    }));
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
+  async createScenario(name: string): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    const now = Date.now();
+    library.scenarios = library.scenarios ?? [];
+    library.scenarios.push({
+      id: crypto.randomUUID(),
+      name: normalizeName(name, "새 시나리오"),
+      itemIds: [],
+      createdAt: now,
+      updatedAt: now
+    });
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
+  async updateScenario(scenarioId: string, patch: ScenarioPatch): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    const scenario = this.findScenario(scenarioId);
+    if (patch.name !== undefined) {
+      scenario.name = normalizeName(patch.name, scenario.name);
+    }
+    if (patch.itemIds !== undefined) {
+      const validIds = new Set(library.items.map((item) => item.id));
+      scenario.itemIds = [...new Set(patch.itemIds)].filter((itemId) => validIds.has(itemId));
+    }
+    scenario.updatedAt = Date.now();
+    await this.saveLibrary();
+    return this.snapshot();
+  }
+
+  async deleteScenario(scenarioId: string): Promise<LibraryState> {
+    const library = this.requireUnlocked();
+    library.scenarios = (library.scenarios ?? []).filter((scenario) => scenario.id !== scenarioId);
     await this.saveLibrary();
     return this.snapshot();
   }
@@ -506,6 +619,15 @@ export class VaultManager {
     return item;
   }
 
+  private findScenario(scenarioId: string): ScenarioRecord {
+    const library = this.requireUnlocked();
+    const scenario = (library.scenarios ?? []).find((entry) => entry.id === scenarioId);
+    if (!scenario) {
+      throw new Error("시나리오를 찾을 수 없습니다.");
+    }
+    return scenario;
+  }
+
   private snapshot(): LibraryState {
     const library = this.requireUnlocked();
     return structuredClone(library);
@@ -516,11 +638,20 @@ export class VaultManager {
     if (!folders.some((folder) => folder.id === ROOT_FOLDER_ID)) {
       folders.unshift(defaultLibrary().folders[0]);
     }
+    const items = (library.items ?? []).map((item) => ({
+      ...item,
+      likes: item.likes ?? 0
+    }));
+    const validItemIds = new Set(items.map((item) => item.id));
     return {
       folders,
-      items: (library.items ?? []).map((item) => ({
-        ...item,
-        likes: item.likes ?? 0
+      items,
+      scenarios: (library.scenarios ?? []).map((scenario) => ({
+        id: scenario.id,
+        name: normalizeName(scenario.name ?? "", "시나리오"),
+        itemIds: [...new Set(scenario.itemIds ?? [])].filter((itemId) => validItemIds.has(itemId)),
+        createdAt: scenario.createdAt ?? Date.now(),
+        updatedAt: scenario.updatedAt ?? scenario.createdAt ?? Date.now()
       }))
     };
   }

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { FolderPatch, ImportResult, LibraryState, MediaPatch, OrientationUpdate, VaultStatus } from "./shared/types";
+import type { FolderPatch, ImportResult, LibraryState, MediaPatch, OrientationUpdate, ScenarioPatch, VaultStatus } from "./shared/types";
 
 type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -24,10 +24,17 @@ contextBridge.exposeInMainWorld("milbi", {
   importMedia: (folderId?: string) => invoke<ImportResult>("media:import", folderId),
   importDroppedMedia: (filePaths: string[], folderId?: string) => invoke<ImportResult>("media:importPaths", filePaths, folderId),
   likeMedia: (itemId: string) => invoke<LibraryState>("media:like", itemId),
+  adjustMediaLikes: (itemIds: string[], delta: number) => invoke<LibraryState>("media:adjustLikes", itemIds, delta),
+  setMediaLikes: (itemIds: string[], likes: number) => invoke<LibraryState>("media:setLikes", itemIds, likes),
   addTagsToMedia: (itemIds: string[], tags: string[]) => invoke<LibraryState>("media:addTags", itemIds, tags),
+  renameTag: (oldTag: string, nextTag: string) => invoke<LibraryState>("tag:rename", oldTag, nextTag),
+  deleteTag: (tag: string) => invoke<LibraryState>("tag:delete", tag),
   tagMediaOrientations: (updates: OrientationUpdate[]) => invoke<LibraryState>("media:tagOrientations", updates),
   updateMedia: (itemId: string, patch: MediaPatch) => invoke<LibraryState>("media:update", itemId, patch),
   deleteMedia: (itemId: string) => invoke<LibraryState>("media:delete", itemId),
+  createScenario: (name: string) => invoke<LibraryState>("scenario:create", name),
+  updateScenario: (scenarioId: string, patch: ScenarioPatch) => invoke<LibraryState>("scenario:update", scenarioId, patch),
+  deleteScenario: (scenarioId: string) => invoke<LibraryState>("scenario:delete", scenarioId),
   setViewerFullscreen: (fullscreen: boolean) => invoke<boolean>("viewer:fullscreen", fullscreen),
   mediaSrc: (itemId: string) => `milbi://media/${encodeURIComponent(itemId)}`,
   filePathFor: (file: File) => webUtils.getPathForFile(file)

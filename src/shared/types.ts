@@ -21,9 +21,18 @@ export interface MediaRecord {
   importedAt: number;
 }
 
+export interface ScenarioRecord {
+  id: string;
+  name: string;
+  itemIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface LibraryState {
   folders: FolderRecord[];
   items: MediaRecord[];
+  scenarios: ScenarioRecord[];
 }
 
 export interface VaultStatus {
@@ -41,6 +50,11 @@ export interface MediaPatch {
   folderId?: string;
   displayName?: string;
   tags?: string[];
+}
+
+export interface ScenarioPatch {
+  name?: string;
+  itemIds?: string[];
 }
 
 export interface OrientationUpdate {

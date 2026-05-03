@@ -6,17 +6,20 @@ import {
   Folder,
   FolderPlus,
   Grid2X2,
+  GripVertical,
   HardDrive,
   Heart,
   Image as ImageIcon,
   List,
   Lock,
   Maximize2,
+  Minus,
   MoveHorizontal,
   MoveVertical,
   Pause,
   Pencil,
   Play,
+  Plus,
   Search,
   Shuffle,
   Tag,
@@ -26,16 +29,30 @@ import {
   X
 } from "lucide-react";
 import { CSSProperties, DragEvent, FormEvent, MouseEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { ImportResult, LibraryState, MediaOrientation, MediaRecord, OrientationUpdate, VaultStatus } from "../shared/types";
+import type { ImportResult, LibraryState, MediaOrientation, MediaRecord, OrientationUpdate, ScenarioRecord, VaultStatus } from "../shared/types";
 
 const ALL_SCOPE = "all";
 const UNTAGGED_SCOPE = "untagged";
 const LIKED_SCOPE = "liked";
+const TIER_SCOPE_PREFIX = "tier:";
 const ROOT_FOLDER_ID = "root";
 const ORIENTATION_TAG_LABELS = new Set(["가로", "세로", "정방형"]);
+const MEDIA_DRAG_TYPE = "application/x-milbi-media-ids";
+const SCENARIO_DRAG_TYPE = "application/x-milbi-scenario-index";
 
 type Scope = typeof ALL_SCOPE | string;
 type ViewMode = "grid" | "list";
+type TierName = "S" | "A" | "B" | "C" | "D" | "E";
+type ViewerState = { startId: string; scenarioId?: string };
+
+const TIERS: Array<{ name: TierName; min: number; max: number | null; label: string }> = [
+  { name: "S", min: 21, max: null, label: "21+" },
+  { name: "A", min: 16, max: 20, label: "16-20" },
+  { name: "B", min: 11, max: 15, label: "11-15" },
+  { name: "C", min: 6, max: 10, label: "6-10" },
+  { name: "D", min: 1, max: 5, label: "1-5" },
+  { name: "E", min: 0, max: 0, label: "0" }
+];
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -63,6 +80,24 @@ function mediaSrc(itemId: string): string {
   return window.milbi.mediaSrc(itemId);
 }
 
+function tierScope(tier: TierName): string {
+  return `${TIER_SCOPE_PREFIX}${tier}`;
+}
+
+function tierFromScope(scope: Scope): TierName | null {
+  if (!scope.startsWith(TIER_SCOPE_PREFIX)) return null;
+  const tier = scope.slice(TIER_SCOPE_PREFIX.length);
+  return TIERS.some((entry) => entry.name === tier) ? (tier as TierName) : null;
+}
+
+function tierForLikes(likes: number): TierName {
+  return TIERS.find((tier) => likes >= tier.min && (tier.max === null || likes <= tier.max))?.name ?? "E";
+}
+
+function tierMinimum(tierName: TierName): number {
+  return TIERS.find((tier) => tier.name === tierName)?.min ?? 0;
+}
+
 function uniqueTags(items: MediaRecord[]): string[] {
   return [...new Set(items.flatMap((item) => item.tags))].sort((a, b) => a.localeCompare(b));
 }
@@ -75,6 +110,34 @@ function isSelectionGesture(event: MouseEvent, showSelection = false): boolean {
   return showSelection || event.shiftKey || event.metaKey || event.ctrlKey;
 }
 
+function droppedMediaIds(event: DragEvent): string[] {
+  const raw = event.dataTransfer.getData(MEDIA_DRAG_TYPE);
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function droppedFilePaths(event: DragEvent): string[] {
+  return Array.from(event.dataTransfer.files)
+    .map((file) => window.milbi.filePathFor(file))
+    .filter(Boolean);
+}
+
+function hasDroppableMedia(event: DragEvent): boolean {
+  const types = Array.from(event.dataTransfer.types);
+  return types.includes(MEDIA_DRAG_TYPE) || types.includes("Files");
+}
+
+function scenarioItems(scenario: ScenarioRecord | null, items: MediaRecord[]): MediaRecord[] {
+  if (!scenario) return [];
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return scenario.itemIds.map((itemId) => byId.get(itemId)).filter((item): item is MediaRecord => Boolean(item));
+}
+
 function App() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [library, setLibrary] = useState<LibraryState | null>(null);
@@ -83,7 +146,8 @@ function App() {
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
-  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<ViewerState | null>(null);
+  const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [selectionMode, setSelectionMode] = useState(false);
   const [thumbSize, setThumbSize] = useState(168);
@@ -111,11 +175,13 @@ function App() {
 
   const filteredItems = useMemo(() => {
     const lowerQuery = query.trim().toLowerCase();
+    const activeTier = tierFromScope(scope);
     return (library?.items ?? []).filter((item) => {
       const inScope =
         scope === ALL_SCOPE ||
         (scope === UNTAGGED_SCOPE && userTags(item).length === 0) ||
         (scope === LIKED_SCOPE && item.likes > 0) ||
+        (activeTier !== null && tierForLikes(item.likes ?? 0) === activeTier) ||
         item.folderId === scope;
       const inTags = activeTagFilters.every((tag) => item.tags.includes(tag));
       const inLikes = minLikes <= 0 || item.likes >= minLikes;
@@ -132,8 +198,22 @@ function App() {
     if (!library || scope === ALL_SCOPE) return "전체";
     if (scope === UNTAGGED_SCOPE) return "태그 없음";
     if (scope === LIKED_SCOPE) return "좋아요";
+    const tier = tierFromScope(scope);
+    if (tier) return `${tier} 티어`;
     return library.folders.find((folder) => folder.id === scope)?.name ?? "폴더";
   }, [library, scope]);
+
+  const activeScenario = useMemo(
+    () => library?.scenarios.find((scenario) => scenario.id === activeScenarioId) ?? null,
+    [activeScenarioId, library]
+  );
+  const activeScenarioItems = useMemo(() => scenarioItems(activeScenario, library?.items ?? []), [activeScenario, library]);
+  const viewerItems = useMemo(() => {
+    if (!viewer?.scenarioId) return filteredItems;
+    const scenario = library?.scenarios.find((entry) => entry.id === viewer.scenarioId) ?? null;
+    return scenarioItems(scenario, library?.items ?? []);
+  }, [filteredItems, library, viewer]);
+  const hasActiveFilters = scope !== ALL_SCOPE || activeTagFilters.length > 0 || minLikes > 0 || query.trim().length > 0;
 
   useEffect(() => {
     const visibleIds = new Set(filteredItems.map((item) => item.id));
@@ -145,6 +225,11 @@ function App() {
       return next;
     });
   }, [filteredItems]);
+
+  useEffect(() => {
+    if (!activeScenarioId || library?.scenarios.some((scenario) => scenario.id === activeScenarioId)) return;
+    setActiveScenarioId(null);
+  }, [activeScenarioId, library]);
 
   async function run<T>(task: () => Promise<T>, onSuccess?: (value: T) => void | Promise<void>): Promise<void> {
     setBusy(true);
@@ -244,6 +329,141 @@ function App() {
     );
   }
 
+  function clearFilters(): void {
+    setScope(ALL_SCOPE);
+    setTagFilters(new Set());
+    setMinLikes(0);
+    setQuery("");
+    clearSelection();
+  }
+
+  function openViewer(itemId: string, scenarioId?: string): void {
+    setViewer(scenarioId ? { startId: itemId, scenarioId } : { startId: itemId });
+  }
+
+  function adjustLikes(itemIds: string[], delta: number): void {
+    if (itemIds.length === 0) return;
+    void run(() => window.milbi.adjustMediaLikes(itemIds, delta), setLibrary);
+  }
+
+  function handleRenameTag(tag: string): void {
+    const nextTag = window.prompt("필터 이름", tag);
+    if (!nextTag || nextTag === tag) return;
+    void run(() => window.milbi.renameTag(tag, nextTag), (nextLibrary) => {
+      setLibrary(nextLibrary);
+      setTagFilters((current) => {
+        if (!current.has(tag)) return current;
+        const next = new Set(current);
+        next.delete(tag);
+        next.add(nextTag.trim().replace(/^#/, ""));
+        return next;
+      });
+    });
+  }
+
+  function handleDeleteTag(tag: string): void {
+    if (!window.confirm(`#${tag} 필터를 모든 항목에서 제거할까요?`)) return;
+    void run(() => window.milbi.deleteTag(tag), (nextLibrary) => {
+      setLibrary(nextLibrary);
+      setTagFilters((current) => {
+        const next = new Set(current);
+        next.delete(tag);
+        return next;
+      });
+    });
+  }
+
+  function handleMediaDragStart(itemId: string, event: DragEvent): void {
+    const ids = selectedIds.has(itemId) && selectedIds.size > 0 ? [...selectedIds] : [itemId];
+    event.dataTransfer.setData(MEDIA_DRAG_TYPE, JSON.stringify(ids));
+    event.dataTransfer.effectAllowed = "copyMove";
+  }
+
+  function allowFilterDrop(event: DragEvent): void {
+    if (!hasDroppableMedia(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  async function importDroppedForFilter(filePaths: string[], applyImported: (ids: string[]) => Promise<LibraryState>): Promise<LibraryState> {
+    const result = await window.milbi.importDroppedMedia(filePaths, targetFolderId());
+    let nextLibrary = await window.milbi.getLibrary();
+    if (result.imported.length > 0) {
+      nextLibrary = await applyImported(result.imported.map((item) => item.id));
+      if (autoOrientationTagging) {
+        nextLibrary = await tagOrientations(result.imported);
+      }
+    }
+    if (result.skipped.length > 0) {
+      setError(`가져오지 못한 파일: ${result.skipped.join(", ")}`);
+    }
+    return nextLibrary;
+  }
+
+  function handleDropOnTag(tag: string, event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggingFiles(false);
+    const ids = droppedMediaIds(event);
+    if (ids.length > 0) {
+      void run(() => window.milbi.addTagsToMedia(ids, [tag]), setLibrary);
+      return;
+    }
+
+    const filePaths = droppedFilePaths(event);
+    if (filePaths.length > 0) {
+      void run(() => importDroppedForFilter(filePaths, (importedIds) => window.milbi.addTagsToMedia(importedIds, [tag])), setLibrary);
+    }
+  }
+
+  function handleDropOnTier(tier: TierName, event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    setDraggingFiles(false);
+    const minimumLikes = tierMinimum(tier);
+    const ids = droppedMediaIds(event);
+    if (ids.length > 0) {
+      void run(() => window.milbi.setMediaLikes(ids, minimumLikes), setLibrary);
+      return;
+    }
+
+    const filePaths = droppedFilePaths(event);
+    if (filePaths.length > 0) {
+      void run(() => importDroppedForFilter(filePaths, (importedIds) => window.milbi.setMediaLikes(importedIds, minimumLikes)), setLibrary);
+    }
+  }
+
+  function handleCreateScenario(): void {
+    const name = window.prompt("시나리오 이름");
+    if (!name) return;
+    void run(() => window.milbi.createScenario(name), (nextLibrary) => {
+      setLibrary(nextLibrary);
+      const created = [...nextLibrary.scenarios].sort((a, b) => b.createdAt - a.createdAt)[0];
+      setActiveScenarioId(created?.id ?? null);
+    });
+  }
+
+  function handleRenameScenario(scenario: ScenarioRecord): void {
+    const name = window.prompt("시나리오 이름", scenario.name);
+    if (!name || name === scenario.name) return;
+    void run(() => window.milbi.updateScenario(scenario.id, { name }), setLibrary);
+  }
+
+  function handleDeleteScenario(scenario: ScenarioRecord): void {
+    if (!window.confirm(`${scenario.name} 시나리오를 삭제할까요?`)) return;
+    void run(() => window.milbi.deleteScenario(scenario.id), (nextLibrary) => {
+      setLibrary(nextLibrary);
+      if (activeScenarioId === scenario.id) {
+        setActiveScenarioId(null);
+      }
+    });
+  }
+
+  function updateScenarioItems(scenario: ScenarioRecord, itemIds: string[]): void {
+    void run(() => window.milbi.updateScenario(scenario.id, { itemIds }), setLibrary);
+  }
+
   function orientationForSize(width: number, height: number): MediaOrientation {
     const ratioGap = Math.abs(width - height) / Math.max(width, height);
     if (ratioGap < 0.05) return "square";
@@ -333,7 +553,7 @@ function App() {
   }
 
   function targetFolderId(): string {
-    if (scope === ALL_SCOPE || scope === UNTAGGED_SCOPE || scope === LIKED_SCOPE) return ROOT_FOLDER_ID;
+    if (scope === ALL_SCOPE || scope === UNTAGGED_SCOPE || scope === LIKED_SCOPE || tierFromScope(scope)) return ROOT_FOLDER_ID;
     return scope;
   }
 
@@ -389,7 +609,8 @@ function App() {
       setStatus(nextStatus);
       setLibrary(null);
       clearSelection();
-      setViewerId(null);
+      setViewer(null);
+      setActiveScenarioId(null);
       return nextStatus;
     });
   }
@@ -491,6 +712,65 @@ function App() {
             ))}
         </div>
 
+        <div className="side-section">
+          <div className="side-heading">
+            <span>티어</span>
+            {tierFromScope(scope) && (
+              <button className="text-button" onClick={clearFilters}>
+                해제
+              </button>
+            )}
+          </div>
+          {TIERS.map((tier) => (
+            <button
+              className={`side-item tier-item ${scope === tierScope(tier.name) ? "active" : ""}`}
+              key={tier.name}
+              onClick={() => {
+                setScope(tierScope(tier.name));
+                clearSelection();
+              }}
+              onDragOver={allowFilterDrop}
+              onDrop={(event) => handleDropOnTier(tier.name, event)}
+            >
+              <span className={`tier-mark tier-${tier.name.toLowerCase()}`}>{tier.name}</span>
+              <span>{tier.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="side-section">
+          <div className="side-heading">
+            <span>시나리오</span>
+            <button className="icon-button small" title="시나리오 추가" onClick={handleCreateScenario} disabled={busy}>
+              <Plus size={15} />
+            </button>
+          </div>
+          {library.scenarios.length === 0 ? (
+            <div className="muted-line">시나리오 없음</div>
+          ) : (
+            library.scenarios.map((scenario) => (
+              <div className={`filter-row ${activeScenarioId === scenario.id ? "active" : ""}`} key={scenario.id}>
+                <button
+                  className="side-item"
+                  onClick={() => {
+                    setActiveScenarioId(scenario.id);
+                    clearSelection();
+                  }}
+                >
+                  <List size={15} />
+                  <span>{scenario.name}</span>
+                </button>
+                <button className="icon-button tiny" title="이름 변경" onClick={() => handleRenameScenario(scenario)}>
+                  <Pencil size={14} />
+                </button>
+                <button className="icon-button tiny danger" title="삭제" onClick={() => handleDeleteScenario(scenario)}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
         <div className="side-section grow">
           <div className="side-heading">
             <span>태그</span>
@@ -510,14 +790,23 @@ function App() {
             <div className="muted-line">태그 없음</div>
           ) : (
             tags.map((tag) => (
-              <button
-                className={`side-item ${tagFilters.has(tag) ? "active" : ""}`}
+              <div
+                className={`filter-row ${tagFilters.has(tag) ? "active" : ""}`}
                 key={tag}
-                onClick={() => toggleTagFilter(tag)}
+                onDragOver={allowFilterDrop}
+                onDrop={(event) => handleDropOnTag(tag, event)}
               >
-                <Tag size={15} />
-                {tag}
-              </button>
+                <button className="side-item" onClick={() => toggleTagFilter(tag)}>
+                  <Tag size={15} />
+                  <span>{tag}</span>
+                </button>
+                <button className="icon-button tiny" title="필터 이름 수정" onClick={() => handleRenameTag(tag)}>
+                  <Pencil size={14} />
+                </button>
+                <button className="icon-button tiny danger" title="필터 제거" onClick={() => handleDeleteTag(tag)}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))
           )}
         </div>
@@ -538,6 +827,11 @@ function App() {
             </div>
           </div>
           <div className="library-controls">
+            {hasActiveFilters && (
+              <button className="secondary-button compact" onClick={clearFilters}>
+                필터 초기화
+              </button>
+            )}
             <button
               className={`secondary-button compact ${selectionMode ? "active" : ""}`}
               onClick={() => {
@@ -644,7 +938,8 @@ function App() {
                     showSelection={selectionMode}
                     onSelect={(event) => selectItem(item.id, event)}
                     onToggle={(event) => selectItem(item.id, event, true)}
-                    onOpen={() => setViewerId(item.id)}
+                    onDragStart={(event) => handleMediaDragStart(item.id, event)}
+                    onOpen={() => openViewer(item.id)}
                   />
                 ))}
               </div>
@@ -658,32 +953,47 @@ function App() {
                     showSelection={selectionMode}
                     onSelect={(event) => selectItem(item.id, event)}
                     onToggle={(event) => selectItem(item.id, event, true)}
-                    onOpen={() => setViewerId(item.id)}
+                    onDragStart={(event) => handleMediaDragStart(item.id, event)}
+                    onOpen={() => openViewer(item.id)}
                   />
                 ))}
               </div>
             )}
           </div>
 
-          {selectedItem && (
+          {selectedItem && !activeScenario && (
             <Inspector
               item={selectedItem}
               library={library}
               busy={busy}
               onClose={clearSelection}
-              onOpen={() => setViewerId(selectedItem.id)}
+              onOpen={() => openViewer(selectedItem.id)}
               onLibrary={setLibrary}
               run={run}
+              onAdjustLikes={(delta) => adjustLikes([selectedItem.id], delta)}
+            />
+          )}
+          {activeScenario && (
+            <ScenarioEditor
+              scenario={activeScenario}
+              items={library.items}
+              scenarioItems={activeScenarioItems}
+              busy={busy}
+              onClose={() => setActiveScenarioId(null)}
+              onRename={() => handleRenameScenario(activeScenario)}
+              onDelete={() => handleDeleteScenario(activeScenario)}
+              onUpdateItems={(itemIds) => updateScenarioItems(activeScenario, itemIds)}
+              onOpenViewer={(itemId) => openViewer(itemId, activeScenario.id)}
             />
           )}
         </section>
       </main>
 
-      {viewerId && (
+      {viewer && (
         <Viewer
-          items={filteredItems}
-          startId={viewerId}
-          onClose={() => setViewerId(null)}
+          items={viewerItems}
+          startId={viewer.startId}
+          onClose={() => setViewer(null)}
           onSelect={(itemId) => {
             setSelectedIds(new Set([itemId]));
             setLastSelectedId(itemId);
@@ -795,6 +1105,7 @@ interface MediaTileProps {
   showSelection: boolean;
   onSelect: (event: MouseEvent) => void;
   onToggle: (event: MouseEvent) => void;
+  onDragStart: (event: DragEvent) => void;
   onOpen: () => void;
 }
 
@@ -827,9 +1138,9 @@ function LazyMediaPreview({ item, showVideoBadge = false }: { item: MediaRecord;
     <span className="thumb-media" ref={previewRef}>
       {shouldLoad ? (
         item.kind === "video" ? (
-          <video src={mediaSrc(item.id)} preload="metadata" muted />
+          <video src={mediaSrc(item.id)} preload="metadata" muted draggable={false} />
         ) : (
-          <img src={mediaSrc(item.id)} alt="" loading="lazy" />
+          <img src={mediaSrc(item.id)} alt="" loading="lazy" draggable={false} />
         )
       ) : (
         <span className="thumb-placeholder" aria-hidden="true">
@@ -845,7 +1156,7 @@ function LazyMediaPreview({ item, showVideoBadge = false }: { item: MediaRecord;
   );
 }
 
-function MediaTile({ item, selected, showSelection, onSelect, onToggle, onOpen }: MediaTileProps) {
+function MediaTile({ item, selected, showSelection, onSelect, onToggle, onDragStart, onOpen }: MediaTileProps) {
   function click(event: MouseEvent): void {
     if (event.detail === 2 && !isSelectionGesture(event, showSelection)) {
       onOpen();
@@ -864,7 +1175,12 @@ function MediaTile({ item, selected, showSelection, onSelect, onToggle, onOpen }
   }
 
   return (
-    <article className={`media-tile ${selected ? "selected" : ""} ${showSelection ? "show-selection" : ""}`} onClick={click}>
+    <article
+      className={`media-tile ${selected ? "selected" : ""} ${showSelection ? "show-selection" : ""}`}
+      draggable
+      onClick={click}
+      onDragStart={onDragStart}
+    >
       <button
         className={`select-dot ${selected ? "checked" : ""}`}
         title={selected ? "선택 해제" : "선택"}
@@ -905,10 +1221,11 @@ interface MediaListRowProps {
   showSelection: boolean;
   onSelect: (event: MouseEvent) => void;
   onToggle: (event: MouseEvent) => void;
+  onDragStart: (event: DragEvent) => void;
   onOpen: () => void;
 }
 
-function MediaListRow({ item, selected, showSelection, onSelect, onToggle, onOpen }: MediaListRowProps) {
+function MediaListRow({ item, selected, showSelection, onSelect, onToggle, onDragStart, onOpen }: MediaListRowProps) {
   function click(event: MouseEvent): void {
     if (event.detail === 2 && !isSelectionGesture(event, showSelection)) {
       onOpen();
@@ -927,7 +1244,12 @@ function MediaListRow({ item, selected, showSelection, onSelect, onToggle, onOpe
   }
 
   return (
-    <article className={`media-row ${selected ? "selected" : ""} ${showSelection ? "show-selection" : ""}`} onClick={click}>
+    <article
+      className={`media-row ${selected ? "selected" : ""} ${showSelection ? "show-selection" : ""}`}
+      draggable
+      onClick={click}
+      onDragStart={onDragStart}
+    >
       <button
         className={`select-dot ${selected ? "checked" : ""}`}
         title={selected ? "선택 해제" : "선택"}
@@ -976,9 +1298,10 @@ interface InspectorProps {
   onOpen: () => void;
   onLibrary: (library: LibraryState) => void;
   run: <T>(task: () => Promise<T>, onSuccess?: (value: T) => void | Promise<void>) => Promise<void>;
+  onAdjustLikes: (delta: number) => void;
 }
 
-function Inspector({ item, library, busy, onClose, onOpen, onLibrary, run }: InspectorProps) {
+function Inspector({ item, library, busy, onClose, onOpen, onLibrary, run, onAdjustLikes }: InspectorProps) {
   const [name, setName] = useState(item.displayName);
   const [folderId, setFolderId] = useState(item.folderId);
   const [tags, setTags] = useState(item.tags.join(", "));
@@ -1055,7 +1378,17 @@ function Inspector({ item, library, busy, onClose, onOpen, onLibrary, run }: Ins
         </div>
         <div>
           <dt>좋아요</dt>
-          <dd>{item.likes}</dd>
+          <dd>
+            <span className="like-stepper">
+              <button className="icon-button tiny" title="좋아요 낮추기" onClick={() => onAdjustLikes(-1)} disabled={busy || item.likes <= 0}>
+                <Minus size={13} />
+              </button>
+              <span>{item.likes}</span>
+              <button className="icon-button tiny" title="좋아요 올리기" onClick={() => onAdjustLikes(1)} disabled={busy}>
+                <Plus size={13} />
+              </button>
+            </span>
+          </dd>
         </div>
       </dl>
 
@@ -1070,6 +1403,137 @@ function Inspector({ item, library, busy, onClose, onOpen, onLibrary, run }: Ins
         <button className="icon-button danger" title="삭제" onClick={remove} disabled={busy}>
           <Trash2 size={16} />
         </button>
+      </div>
+    </aside>
+  );
+}
+
+interface ScenarioEditorProps {
+  scenario: ScenarioRecord;
+  items: MediaRecord[];
+  scenarioItems: MediaRecord[];
+  busy: boolean;
+  onClose: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+  onUpdateItems: (itemIds: string[]) => void;
+  onOpenViewer: (itemId: string) => void;
+}
+
+function ScenarioEditor({
+  scenario,
+  items,
+  scenarioItems,
+  busy,
+  onClose,
+  onRename,
+  onDelete,
+  onUpdateItems,
+  onOpenViewer
+}: ScenarioEditorProps) {
+  const itemIds = scenarioItems.map((item) => item.id);
+  const availableIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
+
+  function insertMediaIds(incomingIds: string[], index = itemIds.length): void {
+    const existingIds = new Set(itemIds);
+    const cleanIds = incomingIds.filter((itemId) => availableIds.has(itemId) && !existingIds.has(itemId));
+    if (cleanIds.length === 0) return;
+    const nextIds = [...itemIds];
+    nextIds.splice(index, 0, ...cleanIds);
+    onUpdateItems(nextIds);
+  }
+
+  function reorderItem(fromIndex: number, toIndex: number): void {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= itemIds.length || toIndex > itemIds.length) return;
+    const nextIds = [...itemIds];
+    const [moved] = nextIds.splice(fromIndex, 1);
+    nextIds.splice(fromIndex < toIndex ? toIndex - 1 : toIndex, 0, moved);
+    onUpdateItems(nextIds);
+  }
+
+  function allowDrop(event: DragEvent): void {
+    const types = Array.from(event.dataTransfer.types);
+    if (!types.includes(MEDIA_DRAG_TYPE) && !types.includes(SCENARIO_DRAG_TYPE)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function dropAt(event: DragEvent, index = itemIds.length): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const rawSourceIndex = event.dataTransfer.getData(SCENARIO_DRAG_TYPE);
+    const sourceIndex = rawSourceIndex === "" ? Number.NaN : Number(rawSourceIndex);
+    if (Number.isInteger(sourceIndex)) {
+      reorderItem(sourceIndex, index);
+      return;
+    }
+    insertMediaIds(droppedMediaIds(event), index);
+  }
+
+  function removeAt(index: number): void {
+    onUpdateItems(itemIds.filter((_itemId, itemIndex) => itemIndex !== index));
+  }
+
+  return (
+    <aside className="scenario-editor">
+      <div className="scenario-head">
+        <div>
+          <span className="eyebrow">Scenario</span>
+          <h2>{scenario.name}</h2>
+        </div>
+        <button className="icon-button" title="닫기" onClick={onClose}>
+          <X size={17} />
+        </button>
+      </div>
+
+      <div className="scenario-actions">
+        <button className="primary-button compact" onClick={() => scenarioItems[0] && onOpenViewer(scenarioItems[0].id)} disabled={scenarioItems.length === 0}>
+          <Play size={15} />
+          보기
+        </button>
+        <button className="secondary-button compact" onClick={onRename} disabled={busy}>
+          <Pencil size={14} />
+          이름
+        </button>
+        <button className="secondary-button compact danger" onClick={onDelete} disabled={busy}>
+          <Trash2 size={14} />
+          삭제
+        </button>
+      </div>
+
+      <div className="scenario-list" onDragOver={allowDrop} onDrop={(event) => dropAt(event)}>
+        {scenarioItems.length === 0 ? (
+          <div className="scenario-empty">왼쪽 항목을 드래그해서 추가</div>
+        ) : (
+          scenarioItems.map((item, index) => (
+            <div
+              className="scenario-row"
+              draggable
+              key={item.id}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(SCENARIO_DRAG_TYPE, String(index));
+                event.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={allowDrop}
+              onDrop={(event) => dropAt(event, index)}
+              onDoubleClick={() => onOpenViewer(item.id)}
+            >
+              <GripVertical size={15} />
+              <span className="scenario-index">{index + 1}</span>
+              <button className="scenario-thumb" title="이 지점부터 보기" onClick={() => onOpenViewer(item.id)}>
+                <LazyMediaPreview item={item} />
+              </button>
+              <div className="scenario-row-main">
+                <span title={item.displayName}>{item.displayName}</span>
+                <small>{item.kind === "video" ? "영상" : "이미지"}</small>
+              </div>
+              <button className="icon-button tiny danger" title="시나리오에서 제거" onClick={() => removeAt(index)}>
+                <X size={14} />
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </aside>
   );
@@ -1238,6 +1702,12 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
     revealChrome();
   }
 
+  function dislikeCurrent(): void {
+    if (!current) return;
+    void window.milbi.adjustMediaLikes([current.id], -1).then(onLibrary).catch(() => undefined);
+    revealChrome();
+  }
+
   function deleteCurrent(): void {
     if (!current || !window.confirm("현재 항목을 보관함에서 삭제할까요?")) return;
     const deletedId = current.id;
@@ -1358,6 +1828,9 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
       } else if (event.key.toLowerCase() === "l") {
         event.preventDefault();
         likeCurrent();
+      } else if (event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        dislikeCurrent();
       } else if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
         deleteCurrent();
@@ -1470,6 +1943,10 @@ function Viewer({ items, startId, onClose, onSelect, onLibrary }: ViewerProps) {
           <button className="viewer-chip" title="좋아요" onClick={likeCurrent}>
             <Heart size={15} />
             {currentLikes}
+          </button>
+          <button className="viewer-chip" title="좋아요 낮추기" onClick={dislikeCurrent} disabled={currentLikes <= 0}>
+            <Minus size={15} />
+            감소
           </button>
           <button className="viewer-chip danger" title="삭제" onClick={deleteCurrent}>
             <Trash2 size={15} />
