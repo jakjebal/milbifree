@@ -1,6 +1,6 @@
 {
   "name": "milbi",
-  "version": "0.1.0",
+  "version": "0.1.7",
   "description": "Private encrypted media vault for images and videos.",
   "main": "dist-electron/main/main.js",
   "type": "commonjs",
