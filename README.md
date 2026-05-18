@@ -112,3 +112,5 @@ Windows machine or CI runner; macOS packaging should be run on macOS.
 - Encrypted thumbnail cache instead of full media preview loading
 - Optional decoy timeout and auto-lock on inactivity
 - Export selected encrypted items back to normal files after password unlock
+
+<!-- trigger cache rebuild -->
